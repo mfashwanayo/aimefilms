@@ -1,0 +1,94 @@
+
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="AimeFilms - High-fidelity cinematic network for discovering and streaming curated movies." />
+    <title>aimefilms - Discover Your Next Streaming Obsession</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <style>
+      body {
+        font-family: 'Inter', sans-serif;
+        background-color: #000000;
+        color: #ffffff;
+        margin: 0;
+        overflow-x: hidden;
+      }
+      
+      :focus { outline: none; }
+      :focus-visible { outline: 2px solid #ef4444; outline-offset: 4px; border-radius: 4px; }
+
+      ::-webkit-scrollbar { width: 6px; height: 6px; }
+      ::-webkit-scrollbar-track { background: #000; }
+      ::-webkit-scrollbar-thumb { background: #333; border-radius: 10px; }
+      ::-webkit-scrollbar-thumb:hover { background: #ef4444; }
+
+      .no-scrollbar::-webkit-scrollbar { display: none; }
+      .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+      .hero-mask {
+        clip-path: polygon(0 0, 100% 5%, 100% 95%, 85% 100%, 15% 98%, 0 92%);
+      }
+
+      @media (min-width: 768px) {
+        .hero-mask {
+          clip-path: polygon(0 5%, 35% 0, 75% 8%, 100% 2%, 100% 90%, 80% 98%, 40% 92%, 0 100%);
+        }
+      }
+
+      .stroke-text {
+        -webkit-text-stroke: 2px rgba(255, 255, 255, 0.4);
+        color: transparent;
+        transition: all 0.5s ease;
+      }
+
+      .group-hover\/card:hover .stroke-text {
+        -webkit-text-stroke: 3px rgba(220, 38, 38, 0.9);
+        filter: drop-shadow(0 0 15px rgba(220, 38, 38, 0.5));
+      }
+
+      /* Top 10 Marquee Animation */
+      @keyframes marquee {
+        0% { transform: translateX(0); }
+        100% { transform: translateX(-50%); }
+      }
+
+      .animate-marquee {
+        display: flex;
+        width: max-content;
+        animation: marquee 40s linear infinite;
+      }
+
+      .animate-marquee:hover {
+        animation-play-state: paused;
+      }
+
+      .glow-spot {
+        position: absolute;
+        width: 600px;
+        height: 600px;
+        background: radial-gradient(circle, rgba(220, 38, 38, 0.15) 0%, transparent 70%);
+        pointer-events: none;
+        z-index: 0;
+        filter: blur(80px);
+      }
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "react/": "https://esm.sh/react@^19.2.4/",
+    "react": "https://esm.sh/react@^19.2.4",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.4/",
+    "@google/genai": "https://esm.sh/@google/genai@^1.39.0"
+  }
+}
+</script>
+<link rel="stylesheet" href="/index.css">
+</head>
+  <body>
+    <div id="root"></div>
+  <script type="module" src="/index.tsx"></script>
+</body>
+</html>
