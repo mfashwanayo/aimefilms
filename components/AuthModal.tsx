@@ -145,21 +145,27 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, initialMode, onL
 
   const brandBg = {
     aimefilms: 'bg-red-600 hover:bg-red-700',
-    filmsnyarwanda: 'bg-blue-600 hover:bg-blue-700',
+    filmsnyarwanda: 'bg-yellow-400 hover:bg-yellow-500',
     princefilms: 'bg-purple-600 hover:bg-purple-700'
   };
 
+  const activeBg = brandBg[brand] || brandBg.aimefilms;
+
   const brandBorder = {
     aimefilms: 'focus:border-red-600',
-    filmsnyarwanda: 'focus:border-blue-600',
+    filmsnyarwanda: 'focus:border-yellow-400',
     princefilms: 'focus:border-purple-600'
   };
 
+  const activeBorder = brandBorder[brand] || brandBorder.aimefilms;
+
   const brandText = {
     aimefilms: 'text-red-500',
-    filmsnyarwanda: 'text-blue-500',
+    filmsnyarwanda: 'text-yellow-400',
     princefilms: 'text-purple-500'
   };
+
+  const activeText = brandText[brand] || brandText.aimefilms;
 
   if (!isOpen) return null;
 
@@ -176,12 +182,12 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, initialMode, onL
 
         {isSuccess ? (
           <div className="py-20 flex flex-col items-center justify-center text-center">
-            <div className={`w-16 h-16 ${brandBg[brand].split(' ')[0]} rounded-full flex items-center justify-center mb-8 shadow-2xl`}><svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="4"><path d="M20 6 9 17l-5-5"/></svg></div>
+            <div className={`w-16 h-16 ${activeBg.split(' ')[0]} rounded-full flex items-center justify-center mb-8 shadow-2xl`}><svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="4"><path d="M20 6 9 17l-5-5"/></svg></div>
             <p className="text-white font-black text-lg tracking-tight uppercase">{tc.success}</p>
           </div>
         ) : (
           <div className="space-y-4">
-            {error && <div className={`p-3 rounded-xl text-[10px] font-black uppercase tracking-widest bg-white/5 ${brandText[brand]}`}>{error}</div>}
+            {error && <div className={`p-3 rounded-xl text-[10px] font-black uppercase tracking-widest bg-white/5 ${activeText}`}>{error}</div>}
 
             {mode === 'signin' && (
               <div className="space-y-6">
@@ -195,7 +201,7 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, initialMode, onL
                           onClick={() => handleQuickLogin(acc)}
                           className="flex items-center gap-3 bg-white/5 hover:bg-white/10 border border-white/5 p-2 pr-4 rounded-full transition-all group"
                         >
-                          <div className={`w-8 h-8 rounded-full ${brandBg[brand].split(' ')[0]} flex items-center justify-center font-black text-xs`}>
+                          <div className={`w-8 h-8 rounded-full ${activeBg.split(' ')[0]} flex items-center justify-center font-black text-xs`}>
                             {acc.name.charAt(0)}
                           </div>
                           <div className="text-left">
@@ -214,8 +220,8 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, initialMode, onL
                 )}
 
                 <form onSubmit={handleSignin} className="space-y-4">
-                  <input type="text" placeholder={language === 'RW' ? "Username cyangwa Email" : t.email} required className={`w-full bg-white/5 text-white px-6 py-4 rounded-xl border border-white/5 ${brandBorder[brand]} outline-none font-bold`} value={identifier} onChange={(e) => setIdentifier(e.target.value)} />
-                  <input type="password" placeholder="••••••••" required className={`w-full bg-white/5 text-white px-6 py-4 rounded-xl border border-white/5 ${brandBorder[brand]} outline-none font-bold`} value={password} onChange={(e) => setPassword(e.target.value)} />
+                  <input type="text" placeholder={language === 'RW' ? "Username cyangwa Email" : t.email} required className={`w-full bg-white/5 text-white px-6 py-4 rounded-xl border border-white/5 ${activeBorder} outline-none font-bold`} value={identifier} onChange={(e) => setIdentifier(e.target.value)} />
+                  <input type="password" placeholder="••••••••" required className={`w-full bg-white/5 text-white px-6 py-4 rounded-xl border border-white/5 ${activeBorder} outline-none font-bold`} value={password} onChange={(e) => setPassword(e.target.value)} />
                   
                   <div className="flex items-center gap-3 px-2">
                     <input 
@@ -230,7 +236,7 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, initialMode, onL
                     </label>
                   </div>
 
-                  <button type="submit" disabled={isSubmitting} className={`w-full py-4 ${brandBg[brand]} text-white rounded-2xl font-black text-xs uppercase transition-all active:scale-95`}>
+                  <button type="submit" disabled={isSubmitting} className={`w-full py-4 ${activeBg} text-white rounded-2xl font-black text-xs uppercase transition-all active:scale-95`}>
                     {isSubmitting ? tc.loading : t.enter}
                   </button>
                   <button type="button" onClick={() => setMode('forgot')} className="w-full text-[10px] font-black uppercase text-gray-500 hover:text-white">{t.forgotLink}</button>
@@ -240,11 +246,11 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, initialMode, onL
 
             {mode === 'signup' && (
               <form onSubmit={handleSignup} className="space-y-4">
-                <input type="text" placeholder={t.name} required className={`w-full bg-white/5 text-white px-6 py-4 rounded-xl border border-white/5 ${brandBorder[brand]} outline-none font-bold`} value={name} onChange={(e) => setName(e.target.value)} />
-                <input type="email" placeholder={t.email} required className={`w-full bg-white/5 text-white px-6 py-4 rounded-xl border border-white/5 ${brandBorder[brand]} outline-none font-bold`} value={email} onChange={(e) => setEmail(e.target.value)} />
-                <input type="password" placeholder={t.passkey} required className={`w-full bg-white/5 text-white px-6 py-4 rounded-xl border border-white/5 ${brandBorder[brand]} outline-none font-bold`} value={password} onChange={(e) => setPassword(e.target.value)} />
-                <input type="password" placeholder={t.confirm} required className={`w-full bg-white/5 text-white px-6 py-4 rounded-xl border border-white/5 ${brandBorder[brand]} outline-none font-bold`} value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} />
-                <button type="submit" disabled={isSubmitting} className={`w-full py-4 ${brandBg[brand]} text-white rounded-2xl font-black text-xs uppercase active:scale-95`}>
+                <input type="text" placeholder={t.name} required className={`w-full bg-white/5 text-white px-6 py-4 rounded-xl border border-white/5 ${activeBorder} outline-none font-bold`} value={name} onChange={(e) => setName(e.target.value)} />
+                <input type="email" placeholder={t.email} required className={`w-full bg-white/5 text-white px-6 py-4 rounded-xl border border-white/5 ${activeBorder} outline-none font-bold`} value={email} onChange={(e) => setEmail(e.target.value)} />
+                <input type="password" placeholder={t.passkey} required className={`w-full bg-white/5 text-white px-6 py-4 rounded-xl border border-white/5 ${activeBorder} outline-none font-bold`} value={password} onChange={(e) => setPassword(e.target.value)} />
+                <input type="password" placeholder={t.confirm} required className={`w-full bg-white/5 text-white px-6 py-4 rounded-xl border border-white/5 ${activeBorder} outline-none font-bold`} value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} />
+                <button type="submit" disabled={isSubmitting} className={`w-full py-4 ${activeBg} text-white rounded-2xl font-black text-xs uppercase active:scale-95`}>
                   {isSubmitting ? tc.loading : t.create}
                 </button>
               </form>
@@ -254,7 +260,7 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, initialMode, onL
               <div className="mt-8 pt-6 border-t border-white/5 text-center">
                 <p className="text-gray-600 text-[9px] font-black uppercase tracking-[0.3em]">
                   {mode === 'signin' ? t.noAcc : t.hasAcc}
-                  <button onClick={() => setMode(mode === 'signin' ? 'signup' : 'signin')} className={`text-white hover:${brandText[brand]} ml-4 font-black`}>
+                  <button onClick={() => setMode(mode === 'signin' ? 'signup' : 'signin')} className={`text-white hover:${activeText} ml-4 font-black`}>
                     {mode === 'signin' ? t.joinHere : t.signHere}
                   </button>
                 </p>

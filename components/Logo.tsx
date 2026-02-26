@@ -43,7 +43,7 @@ const Logo: React.FC<LogoProps> = ({ className = '', size = 'md', brand = 'aimef
     }
   };
 
-  const config = brandConfig[brand];
+  const config = brandConfig[brand] || brandConfig.aimefilms;
 
   return (
     <div className={`flex items-center gap-4 group cursor-pointer select-none transition-all duration-500 ${sizes[size]} ${className}`}>

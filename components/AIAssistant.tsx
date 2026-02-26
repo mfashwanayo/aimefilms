@@ -30,11 +30,11 @@ const AIStudio: React.FC<AIStudioProps> = ({ onSelectService, onExecuteAction, o
 
   const brandColors = {
     aimefilms: { bg: 'bg-red-600', shadow: 'shadow-[0_0_50px_rgba(220,38,38,0.15)]', text: 'text-red-600' },
-    filmsnyarwanda: { bg: 'bg-blue-600', shadow: 'shadow-[0_0_50px_rgba(59,130,246,0.15)]', text: 'text-blue-600' },
+    filmsnyarwanda: { bg: 'bg-yellow-400', shadow: 'shadow-[0_0_50px_rgba(234,179,8,0.15)]', text: 'text-yellow-400' },
     princefilms: { bg: 'bg-purple-600', shadow: 'shadow-[0_0_50px_rgba(168,85,247,0.15)]', text: 'text-purple-600' }
   };
 
-  const currentBrand = brandColors[brand];
+  const currentBrand = brandColors[brand] || brandColors.aimefilms;
 
   useEffect(() => {
     if (initialPrompt) {

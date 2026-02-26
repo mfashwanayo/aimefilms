@@ -22,11 +22,11 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
   
   const brandColors = {
     aimefilms: { bg: 'bg-red-600', shadow: 'shadow-red-600/20', text: 'text-red-600' },
-    filmsnyarwanda: { bg: 'bg-blue-600', shadow: 'shadow-blue-600/20', text: 'text-blue-600' },
+    filmsnyarwanda: { bg: 'bg-yellow-400', shadow: 'shadow-yellow-400/20', text: 'text-yellow-400' },
     princefilms: { bg: 'bg-purple-600', shadow: 'shadow-purple-600/20', text: 'text-purple-600' }
   };
 
-  const currentBrand = brandColors[brand];
+  const currentBrand = brandColors[brand] || brandColors.aimefilms;
 
   // Movie Form State
   const [isAddingMovie, setIsAddingMovie] = useState(false);
