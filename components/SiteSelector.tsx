@@ -16,10 +16,10 @@ const SiteSelector: React.FC<SiteSelectorProps> = ({ onSelect }) => {
       desc: 'Premium Cinematic Network'
     },
     { 
-      id: 'tntfilms', 
-      name: 'TNTFilms', 
-      color: 'from-blue-600/20 to-blue-900/40 border-blue-600/30', 
-      desc: 'Explosive Action & Drama'
+      id: 'filmsnyarwanda', 
+      name: 'FilmsNyarwanda', 
+      color: 'from-yellow-600/20 to-yellow-900/40 border-yellow-600/30', 
+      desc: 'Authentic Local Stories'
     },
     { 
       id: 'princefilms', 

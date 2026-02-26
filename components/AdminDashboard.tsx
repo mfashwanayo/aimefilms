@@ -1,16 +1,17 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { AimeFilmsAPI } from '../services/api';
-import { StreamingService, User, LogEntry, UserMessage } from '../types';
+import { StreamingService, User, LogEntry, UserMessage, Brand } from '../types';
 import Logo from './Logo';
 
 interface AdminDashboardProps {
   isOpen: boolean;
   onClose: () => void;
   onRefresh: () => void;
+  brand: Brand;
 }
 
-const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefresh }) => {
+const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefresh, brand }) => {
   const [activeTab, setActiveTab] = useState<'movies' | 'users' | 'history' | 'feedback' | 'analytics' | 'media'>('analytics');
   const [movies, setMovies] = useState<StreamingService[]>([]);
   const [users, setUsers] = useState<User[]>([]);
@@ -19,6 +20,14 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
   const [stats, setStats] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(false);
   
+  const brandColors = {
+    aimefilms: { bg: 'bg-red-600', shadow: 'shadow-red-600/20', text: 'text-red-600' },
+    filmsnyarwanda: { bg: 'bg-blue-600', shadow: 'shadow-blue-600/20', text: 'text-blue-600' },
+    princefilms: { bg: 'bg-purple-600', shadow: 'shadow-purple-600/20', text: 'text-purple-600' }
+  };
+
+  const currentBrand = brandColors[brand];
+
   // Movie Form State
   const [isAddingMovie, setIsAddingMovie] = useState(false);
   const [newMovie, setNewMovie] = useState<Partial<StreamingService>>({
@@ -107,14 +116,14 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id as any)}
-                className={`flex items-center justify-between px-4 py-3 rounded-xl font-bold text-sm transition-all ${activeTab === tab.id ? 'bg-red-600 text-white shadow-lg shadow-red-600/20' : 'text-gray-500 hover:bg-white/5 hover:text-white'}`}
+                className={`flex items-center justify-between px-4 py-3 rounded-xl font-bold text-sm transition-all ${activeTab === tab.id ? `${currentBrand.bg} text-white shadow-lg ${currentBrand.shadow}` : 'text-gray-500 hover:bg-white/5 hover:text-white'}`}
               >
                 <div className="flex items-center gap-3">
                   <span>{tab.icon}</span>
                   {tab.label}
                 </div>
                 {tab.badge !== undefined && tab.badge > 0 && (
-                  <span className="bg-white text-red-600 px-2 py-0.5 rounded-full text-[10px] font-black">
+                  <span className={`bg-white ${currentBrand.text} px-2 py-0.5 rounded-full text-[10px] font-black`}>
                     {tab.badge}
                   </span>
                 )}
@@ -159,7 +168,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
               {activeTab === 'feedback' && 'User Feedback'}
             </h2>
             {activeTab === 'movies' && (
-              <button onClick={() => setIsAddingMovie(true)} className="bg-white text-black px-6 py-2 rounded-full font-black text-xs uppercase tracking-widest hover:bg-red-600 hover:text-white transition-all">
+              <button onClick={() => setIsAddingMovie(true)} className={`bg-white text-black px-6 py-2 rounded-full font-black text-xs uppercase tracking-widest hover:${currentBrand.bg} hover:text-white transition-all`}>
                 + Upload New Film
               </button>
             )}
@@ -168,7 +177,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
           <main className="flex-1 overflow-y-auto p-10 no-scrollbar">
             {isLoading ? (
               <div className="flex items-center justify-center h-full">
-                <div className="w-10 h-10 border-4 border-red-600 border-t-transparent rounded-full animate-spin" />
+                <div className={`w-10 h-10 border-4 border-${currentBrand.text.replace('text-', '')} border-t-transparent rounded-full animate-spin`} />
               </div>
             ) : (
               <>
@@ -185,10 +194,10 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
                       </div>
                       <div className="bg-white/5 border border-white/10 p-8 rounded-[2.5rem] space-y-4">
                         <div className="flex justify-between items-center">
-                          <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">TNTFilms</p>
-                          <span className="text-blue-500 font-bold text-xs">{stats.brandStats.tntfilms.movies} Assets</span>
+                          <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">FilmsNyarwanda</p>
+                          <span className="text-blue-500 font-bold text-xs">{stats.brandStats.filmsnyarwanda.movies} Assets</span>
                         </div>
-                        <p className="text-4xl font-black italic text-blue-500">{stats.brandStats.tntfilms.views} Views</p>
+                        <p className="text-4xl font-black italic text-blue-500">{stats.brandStats.filmsnyarwanda.views} Views</p>
                       </div>
                       <div className="bg-white/5 border border-white/10 p-8 rounded-[2.5rem] space-y-4">
                         <div className="flex justify-between items-center">
@@ -206,7 +215,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
                         {stats.topMovies.map((movie: any, idx: number) => (
                           <div key={movie.id} className="bg-white/5 border border-white/10 p-6 rounded-2xl flex items-center justify-between group hover:bg-white/[0.08] transition-all">
                             <div className="flex items-center gap-6">
-                              <div className="w-10 h-10 bg-black rounded-lg flex items-center justify-center font-black text-red-600 border border-red-600/30">
+                              <div className={`w-10 h-10 bg-black rounded-lg flex items-center justify-center font-black ${currentBrand.text} border border-${currentBrand.text.replace('text-', '')}/30`}>
                                 {idx + 1}
                               </div>
                               <div>
@@ -244,14 +253,14 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
                 {activeTab === 'movies' && (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {movies.map(movie => (
-                      <div key={movie.id} className="bg-white/5 border border-white/10 rounded-3xl overflow-hidden group hover:border-red-600/50 transition-all">
+                      <div key={movie.id} className={`bg-white/5 border border-white/10 rounded-3xl overflow-hidden group hover:border-${currentBrand.text.replace('text-', '')}/50 transition-all`}>
                         <div className="aspect-video relative">
                           <img src={movie.imageUrl} className="w-full h-full object-cover opacity-60 group-hover:opacity-100 transition-all" />
                           <div className="absolute top-4 left-4 flex gap-2">
                             <div className="bg-black/80 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest border border-white/10">
                               {movie.section}
                             </div>
-                            <div className={`bg-black/80 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest border border-white/10 ${movie.brand === 'tntfilms' ? 'text-blue-500' : movie.brand === 'princefilms' ? 'text-purple-500' : 'text-red-500'}`}>
+                            <div className={`bg-black/80 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest border border-white/10 ${movie.brand === 'filmsnyarwanda' ? 'text-blue-500' : movie.brand === 'princefilms' ? 'text-purple-500' : 'text-red-500'}`}>
                               {movie.brand}
                             </div>
                           </div>
@@ -269,7 +278,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
                             >
                               {movie.isHidden ? '👁️‍🗨️' : '👁️'}
                             </button>
-                            <button onClick={() => handleDeleteMovie(movie.id)} className="p-3 bg-red-600/10 text-red-500 rounded-xl hover:bg-red-600 hover:text-white transition-all">
+                            <button onClick={() => handleDeleteMovie(movie.id)} className={`p-3 bg-red-600/10 text-red-500 rounded-xl hover:${currentBrand.bg} hover:text-white transition-all`}>
                               🗑️
                             </button>
                           </div>
@@ -358,7 +367,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
                             AimeFilmsAPI.clearLogs().then(loadData);
                           }
                         }}
-                        className="px-6 py-2 bg-red-600/10 text-red-500 border border-red-600/20 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-red-600 hover:text-white transition-all"
+                        className={`px-6 py-2 bg-${currentBrand.text.replace('text-', '')}/10 ${currentBrand.text} border border-${currentBrand.text.replace('text-', '')}/20 rounded-xl text-[10px] font-black uppercase tracking-widest hover:${currentBrand.bg} hover:text-white transition-all`}
                       >
                         Clear All History
                       </button>
@@ -422,13 +431,13 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
             <div className="grid grid-cols-2 gap-6">
               <div className="space-y-2">
                 <label className="text-[10px] font-black uppercase tracking-widest text-gray-500">Film Title</label>
-                <input required value={newMovie.name} onChange={e => setNewMovie({...newMovie, name: e.target.value})} className="w-full bg-white/5 border border-white/10 p-4 rounded-2xl outline-none focus:border-red-600" />
+                <input required value={newMovie.name} onChange={e => setNewMovie({...newMovie, name: e.target.value})} className={`w-full bg-white/5 border border-white/10 p-4 rounded-2xl outline-none focus:border-${currentBrand.text.replace('text-', '')}`} />
               </div>
               <div className="space-y-2">
                 <label className="text-[10px] font-black uppercase tracking-widest text-gray-500">Network Brand</label>
-                <select value={newMovie.brand} onChange={e => setNewMovie({...newMovie, brand: e.target.value as any})} className="w-full bg-white/5 border border-white/10 p-4 rounded-2xl outline-none focus:border-red-600">
+                <select value={newMovie.brand} onChange={e => setNewMovie({...newMovie, brand: e.target.value as any})} className={`w-full bg-white/5 border border-white/10 p-4 rounded-2xl outline-none focus:border-${currentBrand.text.replace('text-', '')}`}>
                   <option value="aimefilms">AimeFilms</option>
-                  <option value="tntfilms">TNTFilms</option>
+                  <option value="filmsnyarwanda">FilmsNyarwanda</option>
                   <option value="princefilms">PrinceFilms</option>
                 </select>
               </div>
@@ -437,7 +446,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
             <div className="grid grid-cols-2 gap-6">
               <div className="space-y-2">
                 <label className="text-[10px] font-black uppercase tracking-widest text-gray-500">Section</label>
-                <select value={newMovie.section} onChange={e => setNewMovie({...newMovie, section: e.target.value as any})} className="w-full bg-white/5 border border-white/10 p-4 rounded-2xl outline-none focus:border-red-600">
+                <select value={newMovie.section} onChange={e => setNewMovie({...newMovie, section: e.target.value as any})} className={`w-full bg-white/5 border border-white/10 p-4 rounded-2xl outline-none focus:border-${currentBrand.text.replace('text-', '')}`}>
                   <option value="kinyarwanda">Films in Kinyarwanda</option>
                   <option value="rwanda">Films in Rwanda</option>
                   <option value="english">Films in English</option>
@@ -474,7 +483,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
             <div className="space-y-2">
               <label className="text-[10px] font-black uppercase tracking-widest text-gray-500">Full Movie</label>
               <div className="flex gap-4">
-                <input value={newMovie.fullMovieUrl} onChange={e => setNewMovie({...newMovie, fullMovieUrl: e.target.value})} placeholder="URL" className="flex-1 bg-white/5 border border-white/10 p-4 rounded-2xl outline-none focus:border-red-600" />
+                <input value={newMovie.fullMovieUrl} onChange={e => setNewMovie({...newMovie, fullMovieUrl: e.target.value})} placeholder="URL" className={`flex-1 bg-white/5 border border-white/10 p-4 rounded-2xl outline-none focus:border-${currentBrand.text.replace('text-', '')}`} />
                 <label className="bg-white/10 hover:bg-white/20 p-4 rounded-2xl cursor-pointer transition-all">
                   📁
                   <input type="file" accept="video/*" className="hidden" onChange={e => handleFileChange(e, 'fullMovieUrl')} />
@@ -484,10 +493,10 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
 
             <div className="space-y-2">
               <label className="text-[10px] font-black uppercase tracking-widest text-gray-500">Synopsis</label>
-              <textarea required value={newMovie.synopsis} onChange={e => setNewMovie({...newMovie, synopsis: e.target.value})} rows={4} className="w-full bg-white/5 border border-white/10 p-4 rounded-2xl outline-none focus:border-red-600 resize-none" />
+              <textarea required value={newMovie.synopsis} onChange={e => setNewMovie({...newMovie, synopsis: e.target.value})} rows={4} className={`w-full bg-white/5 border border-white/10 p-4 rounded-2xl outline-none focus:border-${currentBrand.text.replace('text-', '')} resize-none`} />
             </div>
 
-            <button type="submit" className="w-full bg-red-600 text-white py-5 rounded-2xl font-black uppercase tracking-widest shadow-xl shadow-red-600/20 hover:scale-[1.02] active:scale-95 transition-all">
+            <button type="submit" className={`w-full ${currentBrand.bg} text-white py-5 rounded-2xl font-black uppercase tracking-widest shadow-xl ${currentBrand.shadow} hover:scale-[1.02] active:scale-95 transition-all`}>
               Commit to Database
             </button>
           </form>

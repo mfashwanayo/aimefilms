@@ -1,0 +1,42 @@
+@import "tailwindcss";
+
+:root {
+  --brand-primary: #ef4444;
+  --brand-glow: rgba(239, 68, 68, 0.15);
+}
+
+.brand-aimefilms {
+  --brand-primary: #ef4444;
+  --brand-glow: rgba(239, 68, 68, 0.15);
+}
+
+.brand-filmsnyarwanda {
+  --brand-primary: #eab308;
+  --brand-glow: rgba(234, 179, 8, 0.15);
+}
+
+.brand-princefilms {
+  --brand-primary: #a855f7;
+  --brand-glow: rgba(168, 85, 247, 0.15);
+}
+
+.glow-spot {
+  background: radial-gradient(circle, var(--brand-glow) 0%, transparent 70%);
+}
+
+.accent-text {
+  color: var(--brand-primary);
+}
+
+.accent-bg {
+  background-color: var(--brand-primary);
+}
+
+.accent-border {
+  border-color: var(--brand-primary);
+}
+
+/* Custom scrollbar based on brand */
+.brand-aimefilms ::-webkit-scrollbar-thumb:hover { background: #ef4444; }
+.brand-filmsnyarwanda ::-webkit-scrollbar-thumb:hover { background: #eab308; }
+.brand-princefilms ::-webkit-scrollbar-thumb:hover { background: #a855f7; }

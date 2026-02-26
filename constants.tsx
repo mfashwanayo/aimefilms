@@ -34,7 +34,7 @@ export const STREAMING_SERVICES: StreamingService[] = [
   {
     id: 'hbo-drama',
     name: 'The Last Dynasty',
-    brand: 'tntfilms',
+    brand: 'filmsnyarwanda',
     category: ServiceCategory.GENERAL,
     description: 'An epic tale of power, betrayal, and history.',
     synopsis: 'In the heart of the 18th century, a young heir must navigate the treacherous waters of the royal court to save their legacy.',

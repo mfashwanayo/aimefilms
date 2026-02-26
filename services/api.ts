@@ -203,7 +203,7 @@ export class AimeFilmsAPI {
 
     const brandStats = {
       aimefilms: { views: 0, movies: movies.filter(m => m.brand === 'aimefilms').length },
-      tntfilms: { views: 0, movies: movies.filter(m => m.brand === 'tntfilms').length },
+      filmsnyarwanda: { views: 0, movies: movies.filter(m => m.brand === 'filmsnyarwanda').length },
       princefilms: { views: 0, movies: movies.filter(m => m.brand === 'princefilms').length }
     };
 

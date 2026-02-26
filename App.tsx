@@ -151,6 +151,12 @@ const App: React.FC = () => {
     localStorage.setItem('aimefilms_brand', brand);
   };
 
+  const handleSwitchBrand = () => {
+    setSelectedBrand(null);
+    localStorage.removeItem('aimefilms_brand');
+    handleGoHome();
+  };
+
   const handleSelectMovie = (movie: StreamingService) => {
     setSelectedService(movie);
     setCurrentView('detail');
@@ -264,14 +270,17 @@ const App: React.FC = () => {
   }
 
   const selectionColor = useMemo(() => {
-    if (selectedBrand === 'tntfilms') return 'selection:bg-blue-600';
+    if (selectedBrand === 'filmsnyarwanda') return 'selection:bg-yellow-400 selection:text-black';
     if (selectedBrand === 'princefilms') return 'selection:bg-purple-600';
     return 'selection:bg-red-600';
   }, [selectedBrand]);
 
+  if (!selectedBrand) {
+    return <SiteSelector onSelect={handleBrandSelect} />;
+  }
+
   return (
-    <div className={`min-h-screen bg-[#000000] text-white ${selectionColor} selection:text-white`}>
-      {!selectedBrand && <SiteSelector onSelect={handleBrandSelect} />}
+    <div className={`min-h-screen bg-[#000000] text-white brand-${selectedBrand} ${selectionColor} selection:text-white`}>
       {showWelcome && <WelcomePopup onStart={handleStartStream} language={language} />}
 
       <Navbar 
@@ -287,7 +296,7 @@ const App: React.FC = () => {
         language={language}
         onLanguageChange={handleLanguageChange}
         brand={selectedBrand || 'aimefilms'}
-        onSwitchBrand={() => setSelectedBrand(null)}
+        onSwitchBrand={handleSwitchBrand}
       />
       
       <main className={showWelcome ? 'hidden' : 'block pt-20'}>
@@ -400,10 +409,11 @@ const App: React.FC = () => {
           initialPrompt={studioPrompt}
           currentMovie={selectedService}
           allMovies={allMovies}
+          brand={selectedBrand || 'aimefilms'}
         />
       )}
 
-      {isAdminOpen && isAdmin && <AdminDashboard isOpen={isAdminOpen} onClose={() => setIsAdminOpen(false)} onRefresh={initApp} />}
+      {isAdminOpen && isAdmin && <AdminDashboard isOpen={isAdminOpen} onClose={() => setIsAdminOpen(false)} onRefresh={initApp} brand={selectedBrand || 'aimefilms'} />}
       {playingVideo && <VideoPlayer url={playingVideo.isFull ? playingVideo.service.fullMovieUrl : playingVideo.service.videoUrl} title={playingVideo.service.name} isFullMovie={playingVideo.isFull} onClose={() => setPlayingVideo(null)} />}
       <AuthModal isOpen={isAuthOpen} onClose={() => setIsAuthOpen(false)} initialMode={authMode} onLogin={handleLogin} language={language} brand={selectedBrand || 'aimefilms'} />
       <AccountModal 
@@ -417,9 +427,20 @@ const App: React.FC = () => {
         onOpenAdmin={() => setIsAdminOpen(true)} 
         onLogout={handleLogout}
         onSwitchAccount={handleSwitchAccount}
+        brand={selectedBrand || 'aimefilms'}
       />
       <LegalModal isOpen={legalModal.isOpen} type={legalModal.type} onClose={() => setLegalModal({ ...legalModal, isOpen: false })} />
       <ContactAdminModal isOpen={isContactOpen} onClose={() => setIsContactOpen(false)} user={user} language={language} />
+      
+      {selectedBrand === 'filmsnyarwanda' && (
+        <button 
+          onClick={() => setIsContactOpen(true)}
+          className="fixed bottom-8 right-8 z-50 w-16 h-16 bg-green-500 rounded-full flex items-center justify-center shadow-2xl hover:scale-110 transition-transform active:scale-95 group"
+        >
+          <div className="absolute inset-0 bg-white/20 rounded-full animate-ping opacity-20" />
+          <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        </button>
+      )}
     </div>
   );
 };

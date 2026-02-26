@@ -25,13 +25,13 @@ const Logo: React.FC<LogoProps> = ({ className = '', size = 'md', brand = 'aimef
       icon: 'A',
       desc: 'Cinematic Network'
     },
-    tntfilms: {
-      name: 'TNT',
+    filmsnyarwanda: {
+      name: 'Agasobanuye',
       suffix: 'FILMS',
-      color: 'from-blue-500 to-blue-900',
-      accent: 'bg-blue-600',
-      icon: 'T',
-      desc: 'Action Network'
+      color: 'from-yellow-400 to-yellow-600',
+      accent: 'bg-yellow-500',
+      icon: 'A',
+      desc: 'Local Network'
     },
     princefilms: {
       name: 'PRINCE',
@@ -63,18 +63,27 @@ const Logo: React.FC<LogoProps> = ({ className = '', size = 'md', brand = 'aimef
 
       <div className="flex flex-col">
         <div className="flex items-baseline">
-          <span className="text-white font-black text-2xl tracking-tighter transition-all duration-300">
+          <span className={`${brand === 'filmsnyarwanda' ? 'text-yellow-400' : 'text-white'} font-black text-2xl tracking-tighter transition-all duration-300`}>
             {config.name}
           </span>
-          <span className="text-gray-400 font-light text-2xl tracking-[0.1em] ml-1 transition-all duration-300 group-hover:text-white">
+          {brand !== 'filmsnyarwanda' && (
+            <span className="text-gray-400 font-light text-2xl tracking-[0.1em] ml-1 transition-all duration-300 group-hover:text-white">
+              {config.suffix}
+            </span>
+          )}
+        </div>
+        {brand === 'filmsnyarwanda' && (
+          <span className="text-white font-black text-[10px] tracking-[0.4em] -mt-1">
             {config.suffix}
           </span>
-        </div>
+        )}
         <div className="flex items-center gap-1 mt-0.5">
-          <div className={`h-[1px] w-4 ${config.accent} rounded-full`} />
-          <span className="text-[7px] font-black uppercase tracking-[0.4em] text-gray-600 transition-colors">
-            {config.desc}
-          </span>
+          <div className={`h-[1px] ${brand === 'filmsnyarwanda' ? 'w-full' : 'w-4'} ${config.accent} rounded-full`} />
+          {brand !== 'filmsnyarwanda' && (
+            <span className="text-[7px] font-black uppercase tracking-[0.4em] text-gray-600 transition-colors">
+              {config.desc}
+            </span>
+          )}
         </div>
       </div>
       

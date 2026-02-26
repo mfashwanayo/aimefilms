@@ -145,19 +145,19 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, initialMode, onL
 
   const brandBg = {
     aimefilms: 'bg-red-600 hover:bg-red-700',
-    tntfilms: 'bg-blue-600 hover:bg-blue-700',
+    filmsnyarwanda: 'bg-blue-600 hover:bg-blue-700',
     princefilms: 'bg-purple-600 hover:bg-purple-700'
   };
 
   const brandBorder = {
     aimefilms: 'focus:border-red-600',
-    tntfilms: 'focus:border-blue-600',
+    filmsnyarwanda: 'focus:border-blue-600',
     princefilms: 'focus:border-purple-600'
   };
 
   const brandText = {
     aimefilms: 'text-red-500',
-    tntfilms: 'text-blue-500',
+    filmsnyarwanda: 'text-blue-500',
     princefilms: 'text-purple-500'
   };
 

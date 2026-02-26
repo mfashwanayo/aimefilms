@@ -39,12 +39,14 @@ const Navbar: React.FC<NavbarProps> = ({
   const [isSearchVisible, setIsSearchVisible] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isLangOpen, setIsLangOpen] = useState(false);
+  const [isBrandOpen, setIsBrandOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   
   const searchInputRef = useRef<HTMLInputElement>(null);
   const profileRef = useRef<HTMLDivElement>(null);
   const langRef = useRef<HTMLDivElement>(null);
+  const brandRef = useRef<HTMLDivElement>(null);
 
   const t = translations[language].nav;
 
@@ -63,6 +65,9 @@ const Navbar: React.FC<NavbarProps> = ({
       }
       if (langRef.current && !langRef.current.contains(event.target as Node)) {
         setIsLangOpen(false);
+      }
+      if (brandRef.current && !brandRef.current.contains(event.target as Node)) {
+        setIsBrandOpen(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -106,6 +111,12 @@ const Navbar: React.FC<NavbarProps> = ({
 
   const isAdmin = user?.role === 'admin';
 
+  const brands: { id: Brand, name: string, color: string }[] = [
+    { id: 'aimefilms', name: 'AimeFilms', color: 'text-red-600' },
+    { id: 'filmsnyarwanda', name: 'FilmsNyarwanda', color: 'text-yellow-500' },
+    { id: 'princefilms', name: 'PrinceFilms', color: 'text-purple-600' }
+  ];
+
   return (
     <header role="banner" className={`fixed top-0 w-full z-[100] transition-all duration-500 ${isScrolled || isMobileMenuOpen ? 'bg-black/95 backdrop-blur-md shadow-2xl border-b border-white/5' : 'bg-gradient-to-b from-black/95 to-transparent'}`}>
       <nav aria-label="Main Navigation" className="px-4 md:px-8 lg:px-12 py-4 md:py-5 flex items-center justify-between">
@@ -129,10 +140,41 @@ const Navbar: React.FC<NavbarProps> = ({
           
           <div className="hidden lg:flex gap-10 text-[10px] font-black uppercase tracking-[0.3em] text-gray-400">
             <button onClick={handleLogoPress} className="hover:text-white transition-colors uppercase">{t.relay}</button>
-            <button onClick={() => onCategoryFilter('Movies')} className="hover:text-white transition-colors uppercase">{t.movies}</button>
             <button onClick={() => onCategoryFilter('Series')} className="hover:text-white transition-colors uppercase">{t.series}</button>
-            <button onClick={() => onCategoryFilter('Trending')} className="hover:text-white transition-colors uppercase">{t.trends}</button>
-            <button onClick={onSwitchBrand} className="text-red-600 hover:text-white transition-colors uppercase">Switch Network</button>
+            {brand === 'filmsnyarwanda' && (
+              <button onClick={() => onCategoryFilter('Categories')} className="hover:text-white transition-colors uppercase">{(t as any).categories}</button>
+            )}
+            <button onClick={() => onCategoryFilter('Movies')} className="hover:text-white transition-colors uppercase">{t.movies}</button>
+            {brand === 'filmsnyarwanda' && (
+              <button onClick={() => onCategoryFilter('FAQs')} className="hover:text-white transition-colors uppercase">{(t as any).faqs}</button>
+            )}
+            {brand !== 'filmsnyarwanda' && (
+              <button onClick={() => onCategoryFilter('Trending')} className="hover:text-white transition-colors uppercase">{t.trends}</button>
+            )}
+            
+            {/* Brand Switcher Desktop */}
+            <div className="relative" ref={brandRef}>
+              <button 
+                onClick={() => setIsBrandOpen(!isBrandOpen)} 
+                className={`${brand === 'filmsnyarwanda' ? 'text-yellow-500' : 'text-red-600'} hover:text-white transition-colors uppercase flex items-center gap-2`}
+              >
+                Switch Network
+                <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform duration-300 ${isBrandOpen ? 'rotate-180' : ''}`}><path d="m6 9 6 6 6-6"/></svg>
+              </button>
+              {isBrandOpen && (
+                <div className="absolute left-0 mt-4 w-48 bg-[#0c0c0c] border border-white/10 rounded-2xl shadow-2xl overflow-hidden animate-in fade-in slide-in-from-top-2">
+                  {brands.map((b) => (
+                    <button 
+                      key={b.id} 
+                      onClick={() => { onSwitchBrand(); setIsBrandOpen(false); }} 
+                      className={`w-full text-left px-5 py-3 text-[10px] font-black uppercase tracking-widest ${brand === b.id ? 'bg-white/5 text-white' : 'text-gray-400 hover:bg-white/5 hover:text-white'}`}
+                    >
+                      <span className={b.color}>{b.name}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </div>
         
@@ -155,7 +197,7 @@ const Navbar: React.FC<NavbarProps> = ({
           </div>
 
           <div className={`flex items-center transition-all duration-500 ${isSearchVisible ? 'bg-white/5 border border-white/10 px-2 md:px-4 py-1.5 md:py-2 rounded-2xl shadow-inner' : ''}`}>
-            <button onClick={toggleSearch} className="text-white hover:text-red-500 transition-colors">
+            <button onClick={toggleSearch} className={`text-white hover:${brand === 'filmsnyarwanda' ? 'text-yellow-500' : 'text-red-500'} transition-colors`}>
               <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
             </button>
             <input 
@@ -166,12 +208,17 @@ const Navbar: React.FC<NavbarProps> = ({
               value={searchQuery}
               onChange={handleSearchChange}
             />
+            {brand === 'filmsnyarwanda' && isSearchVisible && (
+              <button className="bg-yellow-400 text-black p-1.5 rounded-lg ml-2">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+              </button>
+            )}
           </div>
           
           {user ? (
             <div className="relative" ref={profileRef}>
               <button onClick={() => setIsProfileOpen(!isProfileOpen)} className="flex items-center gap-3 group">
-                <div className={`w-8 h-8 md:w-10 md:h-10 rounded-xl md:rounded-2xl ${isAdmin ? 'bg-blue-600' : 'bg-red-600'} flex items-center justify-center font-black text-xs md:text-sm border border-transparent group-hover:border-white transition-all shadow-xl relative overflow-hidden`}>
+                <div className={`w-8 h-8 md:w-10 md:h-10 rounded-xl md:rounded-2xl ${isAdmin ? 'bg-blue-600' : brand === 'filmsnyarwanda' ? 'bg-yellow-400 text-black' : 'bg-red-600 text-white'} flex items-center justify-center font-black text-xs md:text-sm border border-transparent group-hover:border-white transition-all shadow-xl relative overflow-hidden`}>
                   <div className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent" />
                   {user.avatar ? (
                     <img src={user.avatar} className="relative z-10 w-full h-full object-cover" alt="Profile" />
@@ -201,11 +248,16 @@ const Navbar: React.FC<NavbarProps> = ({
             </div>
           ) : (
             <div className="flex gap-2 md:gap-4">
-              <button onClick={() => onOpenAuth('signin')} className="hidden md:block text-gray-500 hover:text-white text-[10px] font-black uppercase tracking-widest transition-all">
-                {t.login}
-              </button>
-              <button onClick={() => onOpenAuth('signup')} className="bg-red-600 text-white px-4 md:px-8 py-2 md:py-3 rounded-xl md:rounded-2xl text-[9px] md:text-[10px] font-black hover:bg-red-700 transition-all shadow-xl active:scale-95 uppercase tracking-widest">
-                {t.join}
+              {brand !== 'filmsnyarwanda' && (
+                <button onClick={() => onOpenAuth('signin')} className="hidden md:block text-gray-500 hover:text-white text-[10px] font-black uppercase tracking-widest transition-all">
+                  {t.login}
+                </button>
+              )}
+              <button 
+                onClick={() => onOpenAuth(brand === 'filmsnyarwanda' ? 'signin' : 'signup')} 
+                className={`${brand === 'filmsnyarwanda' ? 'bg-yellow-400 text-black hover:bg-yellow-500' : 'bg-red-600 text-white hover:bg-red-700'} px-4 md:px-8 py-2 md:py-3 rounded-xl md:rounded-2xl text-[9px] md:text-[10px] font-black transition-all shadow-xl active:scale-95 uppercase tracking-widest`}
+              >
+                {brand === 'filmsnyarwanda' ? t.login : t.join}
               </button>
             </div>
           )}
@@ -222,6 +274,7 @@ const Navbar: React.FC<NavbarProps> = ({
                 { label: t.movies, icon: '🎬', action: () => onCategoryFilter('Movies') },
                 { label: t.series, icon: '📺', action: () => onCategoryFilter('Series') },
                 { label: t.trends, icon: '🔥', action: () => onCategoryFilter('Trending') },
+                { label: 'Switch Network', icon: '🔄', action: onSwitchBrand },
                 { label: t.protocol, icon: '🛡️', action: onAboutClick }
               ].map((item, idx) => (
                 <button key={idx} onClick={() => handleNavClick(item.action)} className="w-full text-left px-6 py-5 rounded-2xl bg-white/5 border border-white/5 text-sm font-black text-gray-400 hover:text-white hover:bg-red-600 transition-all flex items-center justify-between group">

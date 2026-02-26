@@ -1,7 +1,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { getAIStudioResponse } from '../services/geminiService';
-import { StreamingService, Language, User, ChatMessage } from '../types';
+import { StreamingService, Language, User, ChatMessage, Brand } from '../types';
 import { AimeFilmsAPI, MASTER_ADMIN_CREDENTIALS } from '../services/api';
 
 interface AIStudioProps {
@@ -14,9 +14,10 @@ interface AIStudioProps {
   initialPrompt?: string;
   currentMovie?: StreamingService | null;
   allMovies: StreamingService[];
+  brand: Brand;
 }
 
-const AIStudio: React.FC<AIStudioProps> = ({ onSelectService, onExecuteAction, onClose, onLogin, language, user, initialPrompt, currentMovie, allMovies }) => {
+const AIStudio: React.FC<AIStudioProps> = ({ onSelectService, onExecuteAction, onClose, onLogin, language, user, initialPrompt, currentMovie, allMovies, brand }) => {
   const [instruction, setInstruction] = useState(initialPrompt || '');
   const [isProcessing, setIsProcessing] = useState(false);
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
@@ -26,6 +27,14 @@ const AIStudio: React.FC<AIStudioProps> = ({ onSelectService, onExecuteAction, o
   const [pwChangeState, setPwChangeState] = useState<'idle' | 'verifying' | 'setting_new'>('idle');
 
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  const brandColors = {
+    aimefilms: { bg: 'bg-red-600', shadow: 'shadow-[0_0_50px_rgba(220,38,38,0.15)]', text: 'text-red-600' },
+    filmsnyarwanda: { bg: 'bg-blue-600', shadow: 'shadow-[0_0_50px_rgba(59,130,246,0.15)]', text: 'text-blue-600' },
+    princefilms: { bg: 'bg-purple-600', shadow: 'shadow-[0_0_50px_rgba(168,85,247,0.15)]', text: 'text-purple-600' }
+  };
+
+  const currentBrand = brandColors[brand];
 
   useEffect(() => {
     if (initialPrompt) {
@@ -91,12 +100,12 @@ const AIStudio: React.FC<AIStudioProps> = ({ onSelectService, onExecuteAction, o
     <div className="fixed inset-0 z-[600] flex items-end md:items-center justify-center p-0 md:p-4 lg:p-8 overflow-hidden">
       <div className="absolute inset-0 bg-black/95 md:bg-black/80 backdrop-blur-xl" onClick={onClose} />
       
-      <div className="relative bg-[#080808] w-full max-w-md h-[60vh] md:h-[500px] md:rounded-[2rem] border md:border border-white/10 shadow-[0_0_50px_rgba(220,38,38,0.15)] flex flex-col overflow-hidden animate-in slide-in-from-bottom-full duration-500 md:fixed md:bottom-8 md:right-8">
+      <div className={`relative bg-[#080808] w-full max-w-md h-[60vh] md:h-[500px] md:rounded-[2rem] border md:border border-white/10 ${currentBrand.shadow} flex flex-col overflow-hidden animate-in slide-in-from-bottom-full duration-500 md:fixed md:bottom-8 md:right-8`}>
         
         {/* Compact Header */}
         <div className="px-4 py-3 border-b border-white/5 bg-black/80 flex justify-between items-center shrink-0">
           <div className="flex items-center gap-2">
-            <div className={`w-6 h-6 ${user?.role === 'admin' ? 'bg-blue-600' : 'bg-red-600'} rounded-lg flex items-center justify-center shadow-lg`}>
+            <div className={`w-6 h-6 ${user?.role === 'admin' ? 'bg-blue-600' : currentBrand.bg} rounded-lg flex items-center justify-center shadow-lg`}>
                <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2v20"/><path d="m4.93 4.93 14.14 14.14"/><path d="M2 12h20"/></svg>
             </div>
             <div>
@@ -145,7 +154,7 @@ const AIStudio: React.FC<AIStudioProps> = ({ onSelectService, onExecuteAction, o
                   {adminUserList.map(u => (
                     <tr key={u.email}>
                       <td className="px-6 py-4 font-bold">{u.name}</td>
-                      <td className="px-6 py-4 text-xs uppercase font-black text-red-500">{u.role}</td>
+                      <td className={`px-6 py-4 text-xs uppercase font-black ${currentBrand.text}`}>{u.role}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -155,8 +164,8 @@ const AIStudio: React.FC<AIStudioProps> = ({ onSelectService, onExecuteAction, o
 
           {isProcessing && (
             <div className="flex items-center gap-2 animate-pulse pl-2">
-               <div className="w-1 h-1 rounded-full bg-red-600" />
-               <div className="w-1 h-1 rounded-full bg-red-600 delay-150" />
+               <div className={`w-1 h-1 rounded-full ${currentBrand.bg}`} />
+               <div className={`w-1 h-1 rounded-full ${currentBrand.bg} delay-150`} />
                <span className="text-[7px] font-black text-gray-700 uppercase tracking-widest ml-2">Synchronizing Nodes...</span>
             </div>
           )}
@@ -170,9 +179,9 @@ const AIStudio: React.FC<AIStudioProps> = ({ onSelectService, onExecuteAction, o
               onChange={(e) => setInstruction(e.target.value)} 
               placeholder="Ask AimeFilms AI..." 
               disabled={isProcessing} 
-              className="w-full bg-[#0c0c0c] text-white px-5 py-3.5 md:px-6 md:py-4 rounded-xl md:rounded-2xl border border-white/10 focus:border-red-600 focus:outline-none pr-12 text-sm md:text-base font-bold transition-all disabled:opacity-50" 
+              className={`w-full bg-[#0c0c0c] text-white px-5 py-3.5 md:px-6 md:py-4 rounded-xl md:rounded-2xl border border-white/10 focus:border-${currentBrand.text.replace('text-', '')} focus:outline-none pr-12 text-sm md:text-base font-bold transition-all disabled:opacity-50`} 
             />
-            <button type="submit" disabled={isProcessing || !instruction.trim()} className="absolute right-1.5 top-1/2 -translate-y-1/2 bg-red-600 text-white p-2 rounded-lg md:rounded-xl transition-all active:scale-90">
+            <button type="submit" disabled={isProcessing || !instruction.trim()} className={`absolute right-1.5 top-1/2 -translate-y-1/2 ${currentBrand.bg} text-white p-2 rounded-lg md:rounded-xl transition-all active:scale-90`}>
                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="4" className="md:w-5 md:h-5"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
             </button>
           </form>

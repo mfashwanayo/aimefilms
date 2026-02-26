@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { User, UserPost, UserMessage } from '../types';
+import { User, UserPost, UserMessage, Brand } from '../types';
 import { AimeFilmsAPI } from '../services/api';
 
 interface AccountModalProps {
@@ -11,9 +11,10 @@ interface AccountModalProps {
   onOpenAdmin?: () => void;
   onLogout?: () => void;
   onSwitchAccount?: () => void;
+  brand: Brand;
 }
 
-const AccountModal: React.FC<AccountModalProps> = ({ isOpen, onClose, user, onUpdateUser, onOpenAdmin, onLogout, onSwitchAccount }) => {
+const AccountModal: React.FC<AccountModalProps> = ({ isOpen, onClose, user, onUpdateUser, onOpenAdmin, onLogout, onSwitchAccount, brand }) => {
   const [activeTab, setActiveTab] = useState<'profile' | 'inbox' | 'gallery' | 'membership'>('profile');
   const [name, setName] = useState(user?.name || '');
   const [avatar, setAvatar] = useState(user?.avatar || '');
@@ -24,6 +25,14 @@ const AccountModal: React.FC<AccountModalProps> = ({ isOpen, onClose, user, onUp
   const [myPosts, setMyPosts] = useState<UserPost[]>([]);
 
   const avatarInputRef = useRef<HTMLInputElement>(null);
+
+  const brandColors = {
+    aimefilms: { bg: 'bg-red-600', shadow: 'shadow-red-600/20', text: 'text-red-600', glow: 'bg-red-600' },
+    filmsnyarwanda: { bg: 'bg-blue-600', shadow: 'shadow-blue-600/20', text: 'text-blue-600', glow: 'bg-blue-600' },
+    princefilms: { bg: 'bg-purple-600', shadow: 'shadow-purple-600/20', text: 'text-purple-600', glow: 'bg-purple-600' }
+  };
+
+  const currentBrand = brandColors[brand];
 
   useEffect(() => {
     if (isOpen && user) {
@@ -84,7 +93,7 @@ const AccountModal: React.FC<AccountModalProps> = ({ isOpen, onClose, user, onUp
         <div className="w-full md:w-80 bg-black/40 border-b md:border-b-0 md:border-r border-white/5 p-10 flex flex-col gap-3 shrink-0">
           <div className="flex flex-col items-center text-center mb-12">
             <div className="relative w-24 h-24 mb-6 group cursor-pointer" onClick={() => avatarInputRef.current?.click()}>
-              <div className="absolute inset-0 rounded-[2rem] bg-red-600 blur-xl opacity-20 group-hover:opacity-60 transition-opacity" />
+              <div className={`absolute inset-0 rounded-[2rem] ${currentBrand.glow} blur-xl opacity-20 group-hover:opacity-60 transition-opacity`} />
               <div className="relative w-full h-full rounded-[2rem] bg-white/5 border border-white/10 overflow-hidden flex items-center justify-center">
                 {avatar ? <img src={avatar} className="w-full h-full object-cover" /> : <span className="text-3xl font-black text-white">{user.name.charAt(0)}</span>}
               </div>
@@ -111,12 +120,12 @@ const AccountModal: React.FC<AccountModalProps> = ({ isOpen, onClose, user, onUp
               <button 
                 key={tab.id}
                 onClick={() => { setActiveTab(tab.id as any); setSelectedMessage(null); }}
-                className={`w-full flex items-center justify-between px-6 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all ${activeTab === tab.id ? 'bg-red-600 text-white shadow-xl' : 'text-gray-500 hover:text-white hover:bg-white/5'}`}
+                className={`w-full flex items-center justify-between px-6 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all ${activeTab === tab.id ? `${currentBrand.bg} text-white shadow-xl` : 'text-gray-500 hover:text-white hover:bg-white/5'}`}
               >
                 <span className="flex items-center gap-3">
                   {tab.icon} {tab.label}
                 </span>
-                {tab.badge ? <span className="bg-white text-red-600 px-2 py-0.5 rounded-full text-[8px]">{tab.badge}</span> : null}
+                {tab.badge ? <span className={`bg-white ${currentBrand.text} px-2 py-0.5 rounded-full text-[8px]`}>{tab.badge}</span> : null}
               </button>
             ))}
             
@@ -149,9 +158,9 @@ const AccountModal: React.FC<AccountModalProps> = ({ isOpen, onClose, user, onUp
               <form onSubmit={handleSaveProfile} className="space-y-10">
                 <div className="space-y-3">
                   <label className="text-[10px] font-black uppercase text-gray-500 tracking-widest">Amazina yawe</label>
-                  <input value={name} onChange={(e) => setName(e.target.value)} className="w-full bg-white/5 border border-white/10 p-6 rounded-3xl text-white font-bold outline-none focus:border-red-600" />
+                  <input value={name} onChange={(e) => setName(e.target.value)} className={`w-full bg-white/5 border border-white/10 p-6 rounded-3xl text-white font-bold outline-none focus:border-${currentBrand.text.replace('text-', '')}`} />
                 </div>
-                <button type="submit" disabled={isSaving} className="w-full bg-red-600 text-white p-7 rounded-3xl font-black text-xs uppercase tracking-widest hover:bg-red-700 shadow-2xl">
+                <button type="submit" disabled={isSaving} className={`w-full ${currentBrand.bg} text-white p-7 rounded-3xl font-black text-xs uppercase tracking-widest hover:opacity-90 shadow-2xl`}>
                   {isSaving ? 'Bikwa...' : 'Vugurura Konte'}
                 </button>
               </form>
@@ -169,7 +178,7 @@ const AccountModal: React.FC<AccountModalProps> = ({ isOpen, onClose, user, onUp
                     <div 
                       key={msg.id}
                       onClick={() => handleReadMessage(msg)}
-                      className={`p-6 rounded-3xl border cursor-pointer transition-all ${selectedMessage?.id === msg.id ? 'bg-red-600 border-red-500 shadow-xl' : 'bg-white/5 border-white/10 hover:bg-white/10'} ${!msg.isRead && selectedMessage?.id !== msg.id ? 'border-l-4 border-l-red-600' : ''}`}
+                      className={`p-6 rounded-3xl border cursor-pointer transition-all ${selectedMessage?.id === msg.id ? `${currentBrand.bg} border-${currentBrand.text.replace('text-', '')}/50 shadow-xl` : 'bg-white/5 border-white/10 hover:bg-white/10'} ${!msg.isRead && selectedMessage?.id !== msg.id ? `border-l-4 border-l-${currentBrand.text.replace('text-', '')}` : ''}`}
                     >
                       <div className="flex justify-between items-start mb-2">
                         <h4 className={`text-sm font-black uppercase tracking-tight ${selectedMessage?.id === msg.id ? 'text-white' : 'text-gray-200'}`}>{msg.subject}</h4>
@@ -192,7 +201,7 @@ const AccountModal: React.FC<AccountModalProps> = ({ isOpen, onClose, user, onUp
                   {selectedMessage ? (
                     <div className="animate-in fade-in zoom-in duration-300">
                       <div className="mb-10 pb-10 border-b border-white/5">
-                        <span className="text-[10px] font-black text-red-600 uppercase tracking-[0.5em] block mb-4">Ubutumwa buvuye kuri {selectedMessage.fromName}</span>
+                        <span className={`text-[10px] font-black ${currentBrand.text} uppercase tracking-[0.5em] block mb-4`}>Ubutumwa buvuye kuri {selectedMessage.fromName}</span>
                         <h3 className="text-3xl font-black text-white tracking-tighter italic uppercase">{selectedMessage.subject}</h3>
                       </div>
                       <div className="text-gray-300 text-lg leading-relaxed whitespace-pre-wrap font-medium">

@@ -23,24 +23,34 @@ const StreamingRow: React.FC<StreamingRowProps> = ({ title, services, onSelect }
   const rowId = `row-${title.toLowerCase().replace(/\s+/g, '-')}`;
 
   return (
-    <section aria-labelledby={rowId} className="mb-10 px-6 lg:px-12 relative group">
-      <h3 id={rowId} className="text-xl lg:text-2xl font-bold mb-4 text-gray-200 group-hover:text-white transition-colors">
-        {title}
-      </h3>
+    <section aria-labelledby={rowId} className="mb-14 px-6 lg:px-12 relative group">
+      <div className="flex justify-between items-center mb-8">
+        <h3 id={rowId} className="text-2xl lg:text-4xl font-black text-white tracking-tight">
+          {title}
+        </h3>
+        <div className="flex gap-2">
+          <button 
+            onClick={() => scroll('left')}
+            aria-label={`Scroll ${title} left`}
+            className="w-10 h-10 rounded-lg bg-[#0c0c0c] border border-white/10 flex items-center justify-center text-white hover:bg-yellow-400 hover:text-black transition-all shadow-xl"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+          </button>
+          <button 
+            onClick={() => scroll('right')}
+            aria-label={`Scroll ${title} right`}
+            className="w-10 h-10 rounded-lg bg-[#0c0c0c] border border-white/10 flex items-center justify-center text-white hover:bg-yellow-400 hover:text-black transition-all shadow-xl"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6 6-6"/></svg>
+          </button>
+        </div>
+      </div>
       
       <div className="relative">
-        <button 
-          onClick={() => scroll('left')}
-          aria-label={`Scroll ${title} left`}
-          className="absolute left-0 top-0 bottom-0 z-40 bg-black/40 text-white px-2 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-black/60 focus-visible:opacity-100"
-        >
-          <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg>
-        </button>
-
         <div 
           ref={scrollRef}
           role="list"
-          className="flex gap-4 overflow-x-auto scrollbar-hide no-scrollbar py-4 focus-visible:outline-2 focus-visible:outline-red-600 focus-visible:outline-offset-4"
+          className="flex gap-6 overflow-x-auto scrollbar-hide no-scrollbar py-4 focus-visible:outline-2 focus-visible:outline-yellow-400 focus-visible:outline-offset-4"
           style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
           tabIndex={0}
         >
@@ -51,13 +61,6 @@ const StreamingRow: React.FC<StreamingRowProps> = ({ title, services, onSelect }
           ))}
         </div>
 
-        <button 
-          onClick={() => scroll('right')}
-          aria-label={`Scroll ${title} right`}
-          className="absolute right-0 top-0 bottom-0 z-40 bg-black/40 text-white px-2 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-black/60 focus-visible:opacity-100"
-        >
-          <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-9-6"/></svg>
-        </button>
       </div>
     </section>
   );

@@ -50,7 +50,7 @@ export interface LogEntry {
   timestamp: string;
 }
 
-export type Brand = 'aimefilms' | 'tntfilms' | 'princefilms';
+export type Brand = 'aimefilms' | 'filmsnyarwanda' | 'princefilms';
 
 export interface StreamingService {
   id: string;
