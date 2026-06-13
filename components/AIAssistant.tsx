@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { getAIStudioResponse } from '../services/geminiService';
+import { getAIStudioResponseViaBackend } from '../services/geminiBackendClient';
 import { StreamingService, Language, User, ChatMessage, Brand } from '../types';
 import { AimeFilmsAPI, MASTER_ADMIN_CREDENTIALS } from '../services/api';
 
@@ -23,7 +23,7 @@ const AIStudio: React.FC<AIStudioProps> = ({ onSelectService, onExecuteAction, o
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
   const [adminUserList, setAdminUserList] = useState<User[]>([]);
   const [targetDocument, setTargetDocument] = useState<any>(null);
-  
+
   const [pwChangeState, setPwChangeState] = useState<'idle' | 'verifying' | 'setting_new'>('idle');
 
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -59,20 +59,20 @@ const AIStudio: React.FC<AIStudioProps> = ({ onSelectService, onExecuteAction, o
     const userMsg = instruction.trim();
     setIsProcessing(true);
     setInstruction('');
-    
+
     // Add user message to history immediately
     setChatHistory(prev => [...prev, { role: 'user', text: userMsg }]);
 
-    const response = await getAIStudioResponse(
-      userMsg, 
-      language, 
-      !!user, 
-      currentMovie?.name,
-      user?.role,
-      allMovies,
-      chatHistory
-    );
-    
+    const response = await getAIStudioResponseViaBackend({
+      userPrompt: userMsg,
+      language,
+      isCurrentlyAuthenticated: !!user,
+      currentMovieTitle: currentMovie?.name,
+      userRole: user?.role,
+      movies: allMovies,
+      history: chatHistory
+    });
+
     setAdminUserList([]);
     setTargetDocument(null);
 
@@ -99,14 +99,14 @@ const AIStudio: React.FC<AIStudioProps> = ({ onSelectService, onExecuteAction, o
   return (
     <div className="fixed inset-0 z-[600] flex items-end md:items-center justify-center p-0 md:p-4 lg:p-8 overflow-hidden">
       <div className="absolute inset-0 bg-black/95 md:bg-black/80 backdrop-blur-xl" onClick={onClose} />
-      
+
       <div className={`relative bg-[#080808] w-full max-w-md h-[60vh] md:h-[500px] md:rounded-[2rem] border md:border border-white/10 ${currentBrand.shadow} flex flex-col overflow-hidden animate-in slide-in-from-bottom-full duration-500 md:fixed md:bottom-8 md:right-8`}>
-        
+
         {/* Compact Header */}
         <div className="px-4 py-3 border-b border-white/5 bg-black/80 flex justify-between items-center shrink-0">
           <div className="flex items-center gap-2">
             <div className={`w-6 h-6 ${user?.role === 'admin' ? 'bg-blue-600' : currentBrand.bg} rounded-lg flex items-center justify-center shadow-lg`}>
-               <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2v20"/><path d="m4.93 4.93 14.14 14.14"/><path d="M2 12h20"/></svg>
+              <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2v20" /><path d="m4.93 4.93 14.14 14.14" /><path d="M2 12h20" /></svg>
             </div>
             <div>
               <h2 className="text-xs font-black tracking-tighter uppercase italic text-white leading-none">AimeFilms AI</h2>
@@ -117,16 +117,16 @@ const AIStudio: React.FC<AIStudioProps> = ({ onSelectService, onExecuteAction, o
             </div>
           </div>
           <button onClick={onClose} className="p-1.5 hover:bg-white/10 rounded-full transition-all text-gray-500 hover:text-white">
-            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
           </button>
         </div>
 
         {/* Compact Feed Area */}
         <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4 no-scrollbar bg-gradient-to-b from-transparent to-white/[0.01]">
-          
+
           {chatHistory.length === 0 && !isProcessing && (
             <div className="h-full flex flex-col items-center justify-center opacity-10 text-center space-y-2">
-              <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1"><path d="M12 2v20"/><path d="m4.93 4.93 14.14 14.14"/><path d="M2 12h20"/></svg>
+              <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1"><path d="M12 2v20" /><path d="m4.93 4.93 14.14 14.14" /><path d="M2 12h20" /></svg>
               <p className="text-[6px] font-black uppercase tracking-[0.4em]">System Idle</p>
             </div>
           )}
@@ -164,9 +164,9 @@ const AIStudio: React.FC<AIStudioProps> = ({ onSelectService, onExecuteAction, o
 
           {isProcessing && (
             <div className="flex items-center gap-2 animate-pulse pl-2">
-               <div className={`w-1 h-1 rounded-full ${currentBrand.bg}`} />
-               <div className={`w-1 h-1 rounded-full ${currentBrand.bg} delay-150`} />
-               <span className="text-[7px] font-black text-gray-700 uppercase tracking-widest ml-2">Synchronizing Nodes...</span>
+              <div className={`w-1 h-1 rounded-full ${currentBrand.bg}`} />
+              <div className={`w-1 h-1 rounded-full ${currentBrand.bg} delay-150`} />
+              <span className="text-[7px] font-black text-gray-700 uppercase tracking-widest ml-2">Synchronizing Nodes...</span>
             </div>
           )}
         </div>
@@ -174,21 +174,21 @@ const AIStudio: React.FC<AIStudioProps> = ({ onSelectService, onExecuteAction, o
         {/* Compact & Mobile-Friendly Input */}
         <div className="px-5 py-4 md:px-8 md:py-6 bg-black/90 md:bg-black/60 border-t border-white/5 backdrop-blur-xl shrink-0">
           <form id="ai-studio-form" onSubmit={handleStudioSubmit} className="relative group max-w-3xl mx-auto">
-            <input 
-              value={instruction} 
-              onChange={(e) => setInstruction(e.target.value)} 
-              placeholder="Ask AimeFilms AI..." 
-              disabled={isProcessing} 
-              className={`w-full bg-[#0c0c0c] text-white px-5 py-3.5 md:px-6 md:py-4 rounded-xl md:rounded-2xl border border-white/10 focus:border-${currentBrand.text.replace('text-', '')} focus:outline-none pr-12 text-sm md:text-base font-bold transition-all disabled:opacity-50`} 
+            <input
+              value={instruction}
+              onChange={(e) => setInstruction(e.target.value)}
+              placeholder="Ask AimeFilms AI..."
+              disabled={isProcessing}
+              className={`w-full bg-[#0c0c0c] text-white px-5 py-3.5 md:px-6 md:py-4 rounded-xl md:rounded-2xl border border-white/10 focus:border-${currentBrand.text.replace('text-', '')} focus:outline-none pr-12 text-sm md:text-base font-bold transition-all disabled:opacity-50`}
             />
             <button type="submit" disabled={isProcessing || !instruction.trim()} className={`absolute right-1.5 top-1/2 -translate-y-1/2 ${currentBrand.bg} text-white p-2 rounded-lg md:rounded-xl transition-all active:scale-90`}>
-               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="4" className="md:w-5 md:h-5"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="4" className="md:w-5 md:h-5"><path d="m5 12 7-7 7 7" /><path d="M12 19V5" /></svg>
             </button>
           </form>
           <div className="flex justify-center items-center gap-3 mt-3 md:mt-4 opacity-30">
-             <div className="h-px bg-white/10 flex-1" />
-             <p className="text-[6px] md:text-[7px] font-black text-white uppercase tracking-[0.3em]">Direct Relay Link</p>
-             <div className="h-px bg-white/10 flex-1" />
+            <div className="h-px bg-white/10 flex-1" />
+            <p className="text-[6px] md:text-[7px] font-black text-white uppercase tracking-[0.3em]">Direct Relay Link</p>
+            <div className="h-px bg-white/10 flex-1" />
           </div>
         </div>
       </div>
