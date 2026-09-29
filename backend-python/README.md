@@ -1,35 +1,21 @@
-# Python AI Backend (FastAPI)
+# AimeFilms Python backend
+
+FastAPI and SQLite backend for the AimeFilms catalogue.
 
 ## Run locally
-From repo root:
 
 ```bash
 cd backend-python
 python -m venv .venv
-.venv\Scripts\activate
+source .venv/bin/activate
 pip install -r requirements.txt
 uvicorn app:app --host 0.0.0.0 --port 8001 --reload
 ```
 
+## Configuration
+
+Copy `.env.example` to `.env` and set `ADMIN_PASSWORD` and `TOKEN_SECRET` before deploying. `DB_PATH` defaults to `../backend-data/aimefilms.sqlite`.
+
 ## Endpoints
-- `GET /health`
-- `POST /ai/gemini`
-  - Accepts JSON body matching the frontend `getAIStudioResponse` inputs.
 
-### Expected request schema (example)
-```json
-{
-  "userPrompt": "hello",
-  "language": "EN",
-  "isCurrentlyAuthenticated": false,
-  "currentMovieTitle": "Home Page",
-  "userRole": "user",
-  "movies": [],
-  "history": []
-}
-```
-
-### Configure Gemini key
-Set environment variable:
-- `GEMINI_API_KEY`
-
+The service exposes health checks, authentication, movie search and seeding, view tracking, watchlists, continue-watching lists, profile updates, messages, logs, analytics, and administrator movie/user management under `/api`.
