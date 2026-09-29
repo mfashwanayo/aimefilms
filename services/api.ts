@@ -1,9 +1,9 @@
 import { STREAMING_SERVICES } from '../constants';
 import { StreamingService, User, UserPost, UserMessage, LogEntry } from '../types';
 import { backendLogin, backendRegister, backendGetMovies, backendSearchMovies, backendTrackView } from './backendApi';
-import { apiFetch, getAuthToken, setAuthToken, API_BASE_URL } from './http';
+import { apiFetch, getAuthToken, setAuthToken } from './http';
 
-// Compatibility layer: calls PHP REST API via backendApi.ts when possible,
+// Compatibility layer: calls the Python REST API via backendApi.ts when possible,
 // falls back to localStorage when the backend is unreachable.
 
 export const MASTER_ADMIN_CREDENTIALS = {
