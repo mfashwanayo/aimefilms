@@ -4,7 +4,6 @@ import { Language, Brand } from '../types';
 import { translations } from '../locales/translations';
 
 interface HeroProps {
-  onOpenAI: () => void;
   onDiscoverMore: () => void;
   onOpenAuth: (mode: 'signin' | 'signup') => void;
   user?: any | null;
@@ -12,7 +11,7 @@ interface HeroProps {
   brand: Brand;
 }
 
-const Hero: React.FC<HeroProps> = ({ onOpenAI, onDiscoverMore, onOpenAuth, user, language, brand }) => {
+const Hero: React.FC<HeroProps> = ({ onDiscoverMore, onOpenAuth, user, language, brand }) => {
   const t = translations[language].hero;
 
   const brandColors = {
@@ -58,16 +57,6 @@ const Hero: React.FC<HeroProps> = ({ onOpenAI, onDiscoverMore, onOpenAuth, user,
         </p>
         
         <div className="flex flex-col sm:flex-row gap-4 md:gap-6">
-          <button 
-            onClick={onOpenAI}
-            className={`flex items-center justify-center gap-3 md:gap-4 ${brand === 'filmsnyarwanda' ? 'bg-yellow-400 text-black' : 'bg-white text-black'} px-8 md:px-10 py-5 md:py-6 rounded-2xl font-black text-[10px] md:text-xs uppercase tracking-widest hover:opacity-90 transition-all transform hover:scale-105 shadow-xl active:scale-95 group`}
-          >
-            <div className={`w-6 h-6 md:w-8 md:h-8 ${brand === 'filmsnyarwanda' ? 'bg-black' : activeBg} rounded-full flex items-center justify-center animate-pulse group-hover:scale-110 transition-transform`}>
-              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill={brand === 'filmsnyarwanda' ? '#eab308' : 'white'} className="md:w-4 md:h-4"><path d="M12 2L4.5 20.29l.71.71L12 18l6.79 3 .71-.71z"/></svg>
-            </div>
-            {t.aiBtn}
-          </button>
-          
           <button 
             onClick={onDiscoverMore}
             className={`flex items-center justify-center gap-3 md:gap-4 ${brand === 'filmsnyarwanda' ? 'bg-transparent border-2 border-white text-white' : 'bg-black/40 text-white border border-white/20'} px-8 md:px-10 py-5 md:py-6 rounded-2xl font-black text-[10px] md:text-xs uppercase tracking-widest hover:bg-white/10 transition-all backdrop-blur-xl group active:scale-95 shadow-2xl`}
