@@ -5,7 +5,6 @@ import Hero from './components/Hero';
 import StreamingRow from './components/StreamingRow';
 import Top10Row from './components/Top10Row';
 import MovieDetailsPage from './components/MovieDetailsPage';
-import AIStudio from './components/AIAssistant';
 import VideoPlayer from './components/VideoPlayer';
 import AuthModal from './components/AuthModal';
 import AccountModal from './components/AccountModal';
@@ -29,8 +28,6 @@ const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<ViewState>('home');
   const [selectedService, setSelectedService] = useState<StreamingService | null>(null);
   const [playingVideo, setPlayingVideo] = useState<{service: StreamingService, isFull: boolean} | null>(null);
-  const [isStudioOpen, setIsStudioOpen] = useState(false);
-  const [studioPrompt, setStudioPrompt] = useState<string | undefined>(undefined);
   const [isAdminOpen, setIsAdminOpen] = useState(false);
   const [showWelcome, setShowWelcome] = useState(true);
   const [user, setUser] = useState<User | null>(null);
@@ -188,20 +185,6 @@ const App: React.FC = () => {
     setContinueWatching(AimeFilmsAPI.fetchContinueWatching(user.email));
   };
 
-  const handleExecuteAIAction = (action: { type: string, value: string }) => {
-    if (action.type === 'FILTER') {
-      setActiveCategory(action.value);
-      setSearchQuery('');
-      setCurrentView('home');
-      setIsStudioOpen(false);
-    } else if (action.type === 'SEARCH') {
-      setSearchQuery(action.value);
-      setActiveCategory('all');
-      setCurrentView('home');
-      setIsStudioOpen(false);
-    }
-  };
-
   const handleLogin = (userData: User) => {
     setUser(userData);
     localStorage.setItem('aimefilms_user', JSON.stringify(userData));
@@ -303,7 +286,7 @@ const App: React.FC = () => {
         {currentView === 'home' ? (
           <>
             {!searchQuery && activeCategory === 'all' && (
-              <Hero onOpenAI={() => { setStudioPrompt(undefined); setIsStudioOpen(true); }} onDiscoverMore={() => document.getElementById('top10-section')?.scrollIntoView({ behavior: 'smooth' })} onOpenAuth={(mode) => { setAuthMode(mode as any); setIsAuthOpen(true); }} user={user} language={language} brand={selectedBrand || 'aimefilms'} />
+              <Hero onDiscoverMore={() => document.getElementById('top10-section')?.scrollIntoView({ behavior: 'smooth' })} onOpenAuth={(mode) => { setAuthMode(mode as any); setIsAuthOpen(true); }} user={user} language={language} brand={selectedBrand || 'aimefilms'} />
             )}
             <div className={`relative ${ (searchQuery || activeCategory !== 'all') ? 'pt-10' : '-mt-32'} z-20 pb-40 space-y-16`}>
               
@@ -398,20 +381,6 @@ const App: React.FC = () => {
         </footer>
       </main>
 
-      {isStudioOpen && (
-        <AIStudio 
-          onSelectService={(s) => { setIsStudioOpen(false); handleSelectMovie(s); }} 
-          onExecuteAction={handleExecuteAIAction}
-          onClose={() => { setIsStudioOpen(false); setStudioPrompt(undefined); }} 
-          onLogin={handleLogin}
-          language={language}
-          user={user}
-          initialPrompt={studioPrompt}
-          currentMovie={selectedService}
-          allMovies={allMovies}
-          brand={selectedBrand || 'aimefilms'}
-        />
-      )}
 
       {isAdminOpen && isAdmin && <AdminDashboard isOpen={isAdminOpen} onClose={() => setIsAdminOpen(false)} onRefresh={initApp} brand={selectedBrand || 'aimefilms'} />}
       {playingVideo && <VideoPlayer url={playingVideo.isFull ? playingVideo.service.fullMovieUrl : playingVideo.service.videoUrl} title={playingVideo.service.name} isFullMovie={playingVideo.isFull} onClose={() => setPlayingVideo(null)} />}
