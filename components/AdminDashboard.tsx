@@ -383,17 +383,24 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
                       <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">All uploaded assets are stored in the system core.</p>
                     </div>
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                      {movies.map(movie => (
+                      {movies.map(movie => {
+                        const mediaUrl = movie.fullMovieUrl || movie.videoUrl;
+                        const storagePath = mediaUrl?.includes('/aimefilms-videos/')
+                          ? mediaUrl.split('/aimefilms-videos/').pop()
+                          : mediaUrl;
+                        return (
                         <div key={movie.id} className="bg-white/5 border border-white/10 p-4 rounded-2xl space-y-3">
                           <div className="aspect-video bg-black rounded-lg overflow-hidden border border-white/5">
                             <img src={movie.imageUrl} className="w-full h-full object-cover opacity-50" />
                           </div>
                           <div>
                             <p className="text-[10px] font-black uppercase text-white truncate">{movie.name}</p>
-                            <p className="text-[8px] font-black uppercase text-gray-500 mt-1">Path: /films/{movie.name.toLowerCase().replace(/\s+/g, '_')}.mp4</p>
+                            <p className="text-[8px] font-black uppercase text-gray-500 mt-1 break-all">Storage: {storagePath || 'No uploaded video'}</p>
+                            {mediaUrl && <a href={mediaUrl} target="_blank" rel="noreferrer" className="text-[10px] text-green-400 underline">Open video</a>}
                           </div>
                         </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                 )}
@@ -512,7 +519,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
       {/* Add Movie Modal */}
       {isAddingMovie && (
         <div className="fixed inset-0 z-[1100] flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/95 backdrop-blur-xl" onClick={() => setIsAddingMovie(false)} />
+          <div className="absolute inset-0 bg-black/95 backdrop-blur-xl" onClick={() => { if (!isSavingMovie) setIsAddingMovie(false); }} />
           <form onSubmit={handleAddMovie} className="relative bg-[#0c0c0c] w-full max-w-2xl p-10 rounded-[3rem] border border-white/10 shadow-2xl space-y-6 max-h-[90vh] overflow-y-auto no-scrollbar">
             <h3 className="text-3xl font-black italic uppercase tracking-tighter">Upload New Content</h3>
             
@@ -560,32 +567,83 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
             <div className="space-y-2">
               <label className="text-[10px] font-black uppercase tracking-widest text-gray-500">Video (Trailer)</label>
               <div className="flex gap-4">
-                <input value={newMovie.videoUrl} onChange={e => setNewMovie({...newMovie, videoUrl: e.target.value})} placeholder="URL" className="flex-1 bg-white/5 border border-white/10 p-4 rounded-2xl outline-none focus:border-red-600" />
-                <label className="bg-white/10 hover:bg-white/20 p-4 rounded-2xl cursor-pointer transition-all">
-                  📁
-                  <input type="file" accept="video/*" className="hidden" onChange={e => handleFileChange(e, 'videoUrl')} />
+                <input
+                  value={newMovie.videoUrl}
+                  onChange={e => setNewMovie({...newMovie, videoUrl: e.target.value})}
+                  placeholder="Paste trailer URL or choose a video file below"
+                  className="flex-1 min-w-0 bg-white/5 border border-white/10 p-4 rounded-2xl outline-none focus:border-red-600"
+                  disabled={Boolean(selectedVideoFiles.videoUrl)}
+                />
+                <label className="bg-white/10 hover:bg-white/20 px-4 py-3 rounded-2xl cursor-pointer transition-all whitespace-nowrap">
+                  📁 Choose video
+                  <input
+                    type="file"
+                    accept=".mp4,.webm,.mov,.mkv,video/mp4,video/webm,video/quicktime,video/x-matroska"
+                    className="hidden"
+                    onChange={e => handleVideoFileChange(e, 'videoUrl')}
+                  />
                 </label>
               </div>
+              {selectedVideoFiles.videoUrl && (
+                <p className="text-xs text-green-400">{selectedVideoFiles.videoUrl.name} · {formatFileSize(selectedVideoFiles.videoUrl.size)}</p>
+              )}
             </div>
 
             <div className="space-y-2">
               <label className="text-[10px] font-black uppercase tracking-widest text-gray-500">Full Movie</label>
               <div className="flex gap-4">
-                <input value={newMovie.fullMovieUrl} onChange={e => setNewMovie({...newMovie, fullMovieUrl: e.target.value})} placeholder="URL" className={`flex-1 bg-white/5 border border-white/10 p-4 rounded-2xl outline-none focus:border-${currentBrand.text.replace('text-', '')}`} />
-                <label className="bg-white/10 hover:bg-white/20 p-4 rounded-2xl cursor-pointer transition-all">
-                  📁
-                  <input type="file" accept="video/*" className="hidden" onChange={e => handleFileChange(e, 'fullMovieUrl')} />
+                <input
+                  value={newMovie.fullMovieUrl}
+                  onChange={e => setNewMovie({...newMovie, fullMovieUrl: e.target.value})}
+                  placeholder="Paste full movie URL or choose a video file below"
+                  className={`flex-1 min-w-0 bg-white/5 border border-white/10 p-4 rounded-2xl outline-none focus:border-${currentBrand.text.replace('text-', '')}`}
+                  disabled={Boolean(selectedVideoFiles.fullMovieUrl)}
+                />
+                <label className="bg-white/10 hover:bg-white/20 px-4 py-3 rounded-2xl cursor-pointer transition-all whitespace-nowrap">
+                  📁 Choose video
+                  <input
+                    type="file"
+                    accept=".mp4,.webm,.mov,.mkv,video/mp4,video/webm,video/quicktime,video/x-matroska"
+                    className="hidden"
+                    onChange={e => handleVideoFileChange(e, 'fullMovieUrl')}
+                  />
                 </label>
               </div>
+              {selectedVideoFiles.fullMovieUrl && (
+                <p className="text-xs text-green-400">{selectedVideoFiles.fullMovieUrl.name} · {formatFileSize(selectedVideoFiles.fullMovieUrl.size)}</p>
+              )}
             </div>
+
+            {Object.entries(selectedVideoFiles).filter(([, file]) => Boolean(file)).map(([field, file]) => (
+              <div key={field} className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 space-y-2">
+                <div className="flex justify-between gap-4 text-xs">
+                  <span className="font-bold truncate">{file?.name}</span>
+                  <span className="text-gray-400 whitespace-nowrap">{videoProgress[field as 'videoUrl' | 'fullMovieUrl'] ?? 0}%</span>
+                </div>
+                <div className="h-2 rounded-full bg-white/10 overflow-hidden">
+                  <div
+                    className="h-full bg-green-500 transition-[width] duration-200"
+                    style={{ width: `${videoProgress[field as 'videoUrl' | 'fullMovieUrl'] ?? 0}%` }}
+                  />
+                </div>
+              </div>
+            ))}
+            {uploadStatus && (
+              <div className={`rounded-xl px-4 py-3 text-sm border ${uploadStatus.toLowerCase().includes('failed') || uploadStatus.toLowerCase().includes('could not') || uploadStatus.toLowerCase().includes('unavailable') || uploadStatus.toLowerCase().includes('error') ? 'border-red-500/30 bg-red-500/10 text-red-300' : 'border-white/10 bg-white/5 text-gray-300'}`}>
+                {uploadStatus}
+                {uploadStatus.toLowerCase().includes('3.9 gb') && (
+                  <p className="mt-2 text-xs">Note: Supabase Free projects have a separate 50 MB maximum. Videos near 3.9 GB require a paid Supabase plan and a higher global Storage file-size limit.</p>
+                )}
+              </div>
+            )}
 
             <div className="space-y-2">
               <label className="text-[10px] font-black uppercase tracking-widest text-gray-500">Synopsis</label>
               <textarea required value={newMovie.synopsis} onChange={e => setNewMovie({...newMovie, synopsis: e.target.value})} rows={4} className={`w-full bg-white/5 border border-white/10 p-4 rounded-2xl outline-none focus:border-${currentBrand.text.replace('text-', '')} resize-none`} />
             </div>
 
-            <button type="submit" className={`w-full ${currentBrand.bg} text-white py-5 rounded-2xl font-black uppercase tracking-widest shadow-xl ${currentBrand.shadow} hover:scale-[1.02] active:scale-95 transition-all`}>
-              Commit to Database
+            <button type="submit" disabled={isSavingMovie} className={`w-full ${currentBrand.bg} text-white py-5 rounded-2xl font-black uppercase tracking-widest shadow-xl ${currentBrand.shadow} hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-50 disabled:cursor-wait`}>
+              {isSavingMovie ? 'Saving / Uploading…' : 'Commit to Database'}
             </button>
           </form>
         </div>
