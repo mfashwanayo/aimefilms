@@ -5,43 +5,58 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import secrets
-import sqlite3
 import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Request
 from dotenv import load_dotenv
 import psycopg
 from psycopg.rows import dict_row
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
-BASE_DIR = Path(__file__).resolve().parent
-load_dotenv(BASE_DIR / ".env")
+load_dotenv(Path(__file__).resolve().parent / ".env")
 
+# All credentials are provided by the backend environment (Render), never by the
+# browser or checked-in source. DATABASE_URL must be the PostgreSQL connection
+# string from Supabase's Connect panel, not the https://<project>.supabase.co URL.
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
-DB_PATH = Path(os.getenv("DB_PATH", str(BASE_DIR.parent / "backend-data" / "aimefilms.sqlite")))
 ADMIN_NAME = os.getenv("ADMIN_NAME", "").strip()
 ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "").strip().lower()
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
-TOKEN_SECRET_CONFIGURED = bool(os.getenv("TOKEN_SECRET", "").strip())
-TOKEN_SECRET = os.getenv("TOKEN_SECRET", "").strip() or secrets.token_hex(32)
+TOKEN_SECRET = os.getenv("TOKEN_SECRET", "")
 TOKEN_TTL_SECONDS = 60 * 60 * 24 * 7
-MOVIE_ORDER = "ordinal DESC" if DATABASE_URL else "rowid DESC"
 
-app = FastAPI(title="AimeFilms API")
 FRONTEND_ORIGINS = [
-    origin.strip()
-    for origin in os.getenv("FRONTEND_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(",")
+    origin.strip().rstrip("/")
+    for origin in os.getenv("FRONTEND_ORIGINS", "http://localhost:5173").split(",")
     if origin.strip()
 ]
+
+app = FastAPI(
+    title="AimeFilms API",
+    version="1.0.0",
+    description="Backend API for the AimeFilms movie catalogue, accounts, watchlists, messages, and admin tools.",
+)
+
+@app.exception_handler(HTTPException)
+async def http_error_response(request: Request, exc: HTTPException) -> JSONResponse:
+    """Keep API error bodies easy for the React client to display."""
+    message = str(exc.detail) if exc.detail is not None else "Request failed."
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"success": False, "message": message, "detail": message},
+        headers=exc.headers,
+    )
 app.add_middleware(
     CORSMiddleware,
     allow_origins=FRONTEND_ORIGINS,
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
 )
@@ -64,55 +79,44 @@ MOVIE_DEFAULTS: dict[str, Any] = {
 }
 
 
+def validate_config() -> None:
+    missing = [
+        key for key, value in (
+            ("DATABASE_URL", DATABASE_URL),
+            ("ADMIN_NAME", ADMIN_NAME),
+            ("ADMIN_EMAIL", ADMIN_EMAIL),
+            ("ADMIN_PASSWORD", ADMIN_PASSWORD),
+            ("TOKEN_SECRET", TOKEN_SECRET),
+        ) if not value
+    ]
+    if missing:
+        raise RuntimeError("Missing required environment variables: " + ", ".join(missing))
+    if not DATABASE_URL.startswith(("postgresql://", "postgres://")):
+        raise RuntimeError("DATABASE_URL must be a PostgreSQL connection string from Supabase Connect.")
+    if len(ADMIN_PASSWORD) < 12:
+        raise RuntimeError("ADMIN_PASSWORD must be at least 12 characters long.")
+    if len(TOKEN_SECRET) < 32:
+        raise RuntimeError("TOKEN_SECRET must be at least 32 characters long.")
+
+
+def db() -> psycopg.Connection:
+    if not DATABASE_URL:
+        raise RuntimeError("DATABASE_URL is not configured. Set it in the backend environment.")
+    return psycopg.connect(
+        DATABASE_URL,
+        row_factory=dict_row,
+        sslmode="require",
+        connect_timeout=10,
+    )
+
+
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-class DBConnection:
-    """Small adapter allowing the same application queries to run on SQLite or PostgreSQL."""
-
-    def __init__(self, connection: Any, postgres: bool = False):
-        self.connection = connection
-        self.postgres = postgres
-
-    def execute(self, sql: str, params: tuple[Any, ...] | list[Any] = ()):
-        if self.postgres:
-            ignore_conflicts = sql.lstrip().upper().startswith("INSERT OR IGNORE INTO")
-            if ignore_conflicts:
-                sql = sql.replace("INSERT OR IGNORE INTO", "INSERT INTO", 1).rstrip().rstrip(";")
-            sql = sql.replace("?", "%s")
-            if ignore_conflicts:
-                sql += " ON CONFLICT DO NOTHING"
-        return self.connection.execute(sql, params)
-
-    def executescript(self, script: str) -> None:
-        if not self.postgres:
-            self.connection.executescript(script)
-            return
-        for statement in script.split(";"):
-            statement = statement.strip()
-            if statement:
-                self.execute(statement)
-
-    def __getattr__(self, name: str):
-        return getattr(self.connection, name)
-
-
-def db() -> DBConnection:
-    if DATABASE_URL:
-        connection = psycopg.connect(DATABASE_URL, row_factory=dict_row)
-        return DBConnection(connection, postgres=True)
-
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    connection = sqlite3.connect(DB_PATH)
-    connection.row_factory = sqlite3.Row
-    connection.execute("PRAGMA foreign_keys = ON")
-    return DBConnection(connection)
-
-
 def hash_password(password: str) -> str:
     salt = secrets.token_bytes(16)
-    digest = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 120_000)
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 240_000)
     return base64.urlsafe_b64encode(salt).decode() + "$" + base64.urlsafe_b64encode(digest).decode()
 
 
@@ -121,142 +125,116 @@ def verify_password(password: str, stored: str) -> bool:
         salt_text, digest_text = stored.split("$", 1)
         salt = base64.urlsafe_b64decode(salt_text.encode())
         expected = base64.urlsafe_b64decode(digest_text.encode())
-        actual = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 120_000)
+        actual = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 240_000)
         return hmac.compare_digest(actual, expected)
     except (ValueError, TypeError):
         return False
 
 
 def init_db() -> None:
-    if DATABASE_URL and not (ADMIN_NAME and ADMIN_EMAIL and ADMIN_PASSWORD and TOKEN_SECRET_CONFIGURED):
-        raise RuntimeError(
-            "For a Supabase deployment, set ADMIN_NAME, ADMIN_EMAIL, ADMIN_PASSWORD, and TOKEN_SECRET."
+    schema_statements = [
+        """CREATE TABLE IF NOT EXISTS users (
+            email TEXT PRIMARY KEY, name TEXT NOT NULL, password_hash TEXT NOT NULL,
+            avatar TEXT, role TEXT NOT NULL DEFAULT 'user', is_verified SMALLINT NOT NULL DEFAULT 1,
+            can_download SMALLINT NOT NULL DEFAULT 1, language TEXT NOT NULL DEFAULT 'EN',
+            is_blocked SMALLINT NOT NULL DEFAULT 0, joined_at TEXT NOT NULL
+        )""",
+        """CREATE TABLE IF NOT EXISTS movies (
+            id TEXT PRIMARY KEY, ordinal BIGSERIAL UNIQUE,
+            name TEXT NOT NULL, brand TEXT NOT NULL DEFAULT 'aimefilms',
+            category TEXT NOT NULL DEFAULT 'General Entertainment', section TEXT NOT NULL DEFAULT 'english',
+            is_hidden SMALLINT NOT NULL DEFAULT 0, description TEXT NOT NULL DEFAULT '',
+            highlights TEXT NOT NULL DEFAULT '[]', pros TEXT NOT NULL DEFAULT '[]', image_url TEXT NOT NULL DEFAULT '',
+            logo_url TEXT NOT NULL DEFAULT '', link TEXT NOT NULL DEFAULT '', video_url TEXT NOT NULL DEFAULT '',
+            full_movie_url TEXT NOT NULL DEFAULT '', rating TEXT NOT NULL DEFAULT '0', year TEXT NOT NULL DEFAULT '',
+            duration TEXT NOT NULL DEFAULT '', "cast" TEXT NOT NULL DEFAULT '[]', synopsis TEXT NOT NULL DEFAULT '',
+            is_trending SMALLINT NOT NULL DEFAULT 0, is_new SMALLINT NOT NULL DEFAULT 0,
+            genre TEXT NOT NULL DEFAULT '[]', match_score DOUBLE PRECISION NOT NULL DEFAULT 0, price TEXT
+        )""",
+        "ALTER TABLE movies ADD COLUMN IF NOT EXISTS ordinal BIGSERIAL",
+        "CREATE INDEX IF NOT EXISTS movies_ordinal_idx ON movies (ordinal DESC)",
+        """CREATE TABLE IF NOT EXISTS views (
+            movie_id TEXT PRIMARY KEY, view_count BIGINT NOT NULL DEFAULT 0, updated_at TEXT NOT NULL
+        )""",
+        """CREATE TABLE IF NOT EXISTS logs (
+            id TEXT PRIMARY KEY, type TEXT NOT NULL, details TEXT NOT NULL, user_email TEXT, timestamp TEXT NOT NULL
+        )""",
+        """CREATE TABLE IF NOT EXISTS messages (
+            id TEXT PRIMARY KEY, to_email TEXT NOT NULL, from_name TEXT NOT NULL,
+            subject TEXT NOT NULL, body TEXT NOT NULL, timestamp TEXT NOT NULL,
+            is_read SMALLINT NOT NULL DEFAULT 0
+        )""",
+        """CREATE TABLE IF NOT EXISTS user_lists (
+            email TEXT NOT NULL, list_type TEXT NOT NULL, movie_id TEXT NOT NULL,
+            created_at TEXT NOT NULL, PRIMARY KEY (email, list_type, movie_id)
+        )""",
+    ]
+    with db() as connection:
+        for statement in schema_statements:
+            connection.execute(statement)
+
+        # The configured administrator is authoritative. This resets that
+        # account's password to the secret in Render whenever the service starts.
+        connection.execute(
+            """INSERT INTO users
+               (email, name, password_hash, role, is_verified, can_download, joined_at, is_blocked)
+               VALUES (%s, %s, %s, 'admin', 1, 1, %s, 0)
+               ON CONFLICT (email) DO UPDATE SET
+                 name = EXCLUDED.name,
+                 password_hash = EXCLUDED.password_hash,
+                 role = 'admin',
+                 is_blocked = 0""",
+            (ADMIN_EMAIL, ADMIN_NAME, hash_password(ADMIN_PASSWORD), utc_now()),
         )
 
-    connection = db()
-    if DATABASE_URL:
-        connection.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS public.users (
-                email TEXT PRIMARY KEY, name TEXT NOT NULL, password_hash TEXT NOT NULL,
-                avatar TEXT, role TEXT NOT NULL DEFAULT 'user', is_verified SMALLINT NOT NULL DEFAULT 1,
-                can_download SMALLINT NOT NULL DEFAULT 1, language TEXT NOT NULL DEFAULT 'EN',
-                is_blocked SMALLINT NOT NULL DEFAULT 0, joined_at TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS public.movies (
-                id TEXT PRIMARY KEY, ordinal BIGSERIAL UNIQUE, name TEXT NOT NULL,
-                brand TEXT NOT NULL DEFAULT 'aimefilms', category TEXT NOT NULL DEFAULT 'General Entertainment',
-                section TEXT NOT NULL DEFAULT 'english', is_hidden SMALLINT NOT NULL DEFAULT 0,
-                description TEXT NOT NULL DEFAULT '', highlights TEXT NOT NULL DEFAULT '[]',
-                pros TEXT NOT NULL DEFAULT '[]', image_url TEXT NOT NULL DEFAULT '', logo_url TEXT NOT NULL DEFAULT '',
-                link TEXT NOT NULL DEFAULT '', video_url TEXT NOT NULL DEFAULT '', full_movie_url TEXT NOT NULL DEFAULT '',
-                rating TEXT NOT NULL DEFAULT '0', year TEXT NOT NULL DEFAULT '', duration TEXT NOT NULL DEFAULT '',
-                "cast" TEXT NOT NULL DEFAULT '[]', synopsis TEXT NOT NULL DEFAULT '',
-                is_trending SMALLINT NOT NULL DEFAULT 0, is_new SMALLINT NOT NULL DEFAULT 0,
-                genre TEXT NOT NULL DEFAULT '[]', match_score DOUBLE PRECISION NOT NULL DEFAULT 0, price TEXT
-            );
-            CREATE INDEX IF NOT EXISTS movies_ordinal_idx ON public.movies (ordinal DESC);
-            CREATE TABLE IF NOT EXISTS public.views (
-                movie_id TEXT PRIMARY KEY, view_count BIGINT NOT NULL DEFAULT 0, updated_at TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS public.logs (
-                id TEXT PRIMARY KEY, type TEXT NOT NULL, details TEXT NOT NULL, user_email TEXT, timestamp TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS public.messages (
-                id TEXT PRIMARY KEY, to_email TEXT NOT NULL, from_name TEXT NOT NULL, subject TEXT NOT NULL,
-                body TEXT NOT NULL, timestamp TEXT NOT NULL, is_read SMALLINT NOT NULL DEFAULT 0
-            );
-            CREATE TABLE IF NOT EXISTS public.user_lists (
-                email TEXT NOT NULL, list_type TEXT NOT NULL, movie_id TEXT NOT NULL, created_at TEXT NOT NULL,
-                PRIMARY KEY (email, list_type, movie_id)
-            );
-            ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
-            ALTER TABLE public.movies ENABLE ROW LEVEL SECURITY;
-            ALTER TABLE public.views ENABLE ROW LEVEL SECURITY;
-            ALTER TABLE public.logs ENABLE ROW LEVEL SECURITY;
-            ALTER TABLE public.messages ENABLE ROW LEVEL SECURITY;
-            ALTER TABLE public.user_lists ENABLE ROW LEVEL SECURITY;
-            """
-        )
-    else:
-        connection.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS users (
-                email TEXT PRIMARY KEY, name TEXT NOT NULL, password_hash TEXT NOT NULL,
-                avatar TEXT, role TEXT NOT NULL DEFAULT 'user', is_verified INTEGER NOT NULL DEFAULT 1,
-                can_download INTEGER NOT NULL DEFAULT 1, language TEXT NOT NULL DEFAULT 'EN',
-                is_blocked INTEGER NOT NULL DEFAULT 0, joined_at TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS movies (
-                id TEXT PRIMARY KEY, name TEXT NOT NULL, brand TEXT NOT NULL DEFAULT 'aimefilms',
-                category TEXT NOT NULL DEFAULT 'General Entertainment', section TEXT NOT NULL DEFAULT 'english',
-                is_hidden INTEGER NOT NULL DEFAULT 0, description TEXT NOT NULL DEFAULT '',
-                highlights TEXT NOT NULL DEFAULT '[]', pros TEXT NOT NULL DEFAULT '[]', image_url TEXT NOT NULL DEFAULT '',
-                logo_url TEXT NOT NULL DEFAULT '', link TEXT NOT NULL DEFAULT '', video_url TEXT NOT NULL DEFAULT '',
-                full_movie_url TEXT NOT NULL DEFAULT '', rating TEXT NOT NULL DEFAULT '0', year TEXT NOT NULL DEFAULT '',
-                duration TEXT NOT NULL DEFAULT '', cast TEXT NOT NULL DEFAULT '[]', synopsis TEXT NOT NULL DEFAULT '',
-                is_trending INTEGER NOT NULL DEFAULT 0, is_new INTEGER NOT NULL DEFAULT 0,
-                genre TEXT NOT NULL DEFAULT '[]', match_score REAL NOT NULL DEFAULT 0, price TEXT
-            );
-            CREATE TABLE IF NOT EXISTS views (movie_id TEXT PRIMARY KEY, view_count INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL);
-            CREATE TABLE IF NOT EXISTS logs (id TEXT PRIMARY KEY, type TEXT NOT NULL, details TEXT NOT NULL, user_email TEXT, timestamp TEXT NOT NULL);
-            CREATE TABLE IF NOT EXISTS messages (id TEXT PRIMARY KEY, to_email TEXT NOT NULL, from_name TEXT NOT NULL, subject TEXT NOT NULL, body TEXT NOT NULL, timestamp TEXT NOT NULL, is_read INTEGER NOT NULL DEFAULT 0);
-            CREATE TABLE IF NOT EXISTS user_lists (email TEXT NOT NULL, list_type TEXT NOT NULL, movie_id TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY (email, list_type, movie_id));
-            """
-        )
-
-    if ADMIN_EMAIL and ADMIN_PASSWORD:
-        existing_admin = connection.execute("SELECT email FROM users WHERE email = ?", (ADMIN_EMAIL,)).fetchone()
-        if not existing_admin:
-            connection.execute(
-                "INSERT INTO users (email, name, password_hash, role, is_verified, can_download, joined_at) VALUES (?, ?, ?, 'admin', 1, 1, ?)",
-                (ADMIN_EMAIL, ADMIN_NAME or ADMIN_EMAIL.split("@")[0], hash_password(ADMIN_PASSWORD), utc_now()),
-            )
-    connection.commit()
-    connection.close()
+        # No table is directly exposed to anonymous browser access through the
+        # Supabase Data API. The trusted backend connects using DATABASE_URL.
+        for table in ("users", "movies", "views", "logs", "messages", "user_lists"):
+            connection.execute(f'ALTER TABLE "{table}" ENABLE ROW LEVEL SECURITY')
 
 
-def encode_token(user: sqlite3.Row) -> str:
+def encode_token(user: dict[str, Any]) -> str:
     payload = {"email": user["email"], "exp": int(time.time()) + TOKEN_TTL_SECONDS}
     encoded = base64.urlsafe_b64encode(json.dumps(payload, separators=(",", ":")).encode()).decode().rstrip("=")
     signature = hmac.new(TOKEN_SECRET.encode(), encoded.encode(), hashlib.sha256).hexdigest()
     return encoded + "." + signature
 
 
-def current_user(request: Request) -> sqlite3.Row:
+def current_user(request: Request) -> dict[str, Any]:
     header = request.headers.get("authorization", "")
     try:
+        if not header.lower().startswith("bearer "):
+            raise ValueError("missing bearer token")
         encoded, signature = header.split(" ", 1)[1].split(".", 1)
         expected = hmac.new(TOKEN_SECRET.encode(), encoded.encode(), hashlib.sha256).hexdigest()
-        if not header.lower().startswith("bearer ") or not hmac.compare_digest(signature, expected):
-            raise ValueError("invalid token")
+        if not hmac.compare_digest(signature, expected):
+            raise ValueError("invalid signature")
         payload = json.loads(base64.urlsafe_b64decode((encoded + "===").encode()).decode())
         if int(payload["exp"]) < int(time.time()):
             raise ValueError("expired token")
     except (ValueError, KeyError, TypeError, json.JSONDecodeError, IndexError):
         raise HTTPException(status_code=401, detail="Invalid or expired token.")
-    connection = db()
-    user = connection.execute("SELECT * FROM users WHERE email = ?", (payload["email"],)).fetchone()
-    connection.close()
+
+    with db() as connection:
+        user = connection.execute("SELECT * FROM users WHERE email = %s", (payload["email"],)).fetchone()
     if not user or user["is_blocked"]:
         raise HTTPException(status_code=403, detail="Account is unavailable.")
     return user
 
 
-def admin_user(request: Request) -> sqlite3.Row:
+def admin_user(request: Request) -> dict[str, Any]:
     user = current_user(request)
     if user["role"] != "admin":
         raise HTTPException(status_code=403, detail="Administrator access required.")
     return user
 
 
-def public_user(user: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
-    value = dict(user)
+def public_user(user: dict[str, Any]) -> dict[str, Any]:
     return {
-        "name": value["name"], "email": value["email"], "avatar": value.get("avatar"),
-        "role": value["role"], "isVerified": bool(value.get("is_verified", 1)),
-        "canDownload": bool(value.get("can_download", 1)), "language": value.get("language", "EN"),
-        "isBlocked": bool(value.get("is_blocked", 0)), "joinedAt": value.get("joined_at"),
+        "name": user["name"], "email": user["email"], "avatar": user.get("avatar"),
+        "role": user["role"], "isVerified": bool(user.get("is_verified", 1)),
+        "canDownload": bool(user.get("can_download", 1)), "language": user.get("language", "EN"),
+        "isBlocked": bool(user.get("is_blocked", 0)), "joinedAt": user.get("joined_at"),
     }
 
 
@@ -269,7 +247,7 @@ def parse_json(value: Any, default: Any) -> Any:
         return default
 
 
-def movie_from_row(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
+def movie_from_row(row: dict[str, Any]) -> dict[str, Any]:
     value = dict(row)
     return {
         "id": value["id"], "name": value["name"], "brand": value["brand"], "category": value["category"],
@@ -285,7 +263,11 @@ def movie_from_row(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
 
 def normalize_movie(data: dict[str, Any], movie_id: str | None = None) -> dict[str, Any]:
     movie = {**MOVIE_DEFAULTS, **data}
-    aliases = {"imageUrl": "image_url", "logoUrl": "logo_url", "videoUrl": "video_url", "fullMovieUrl": "full_movie_url", "isHidden": "is_hidden", "isTrending": "is_trending", "isNew": "is_new", "matchScore": "match_score"}
+    aliases = {
+        "imageUrl": "image_url", "logoUrl": "logo_url", "videoUrl": "video_url",
+        "fullMovieUrl": "full_movie_url", "isHidden": "is_hidden", "isTrending": "is_trending",
+        "isNew": "is_new", "matchScore": "match_score",
+    }
     for source, target in aliases.items():
         if source in movie:
             movie[target] = movie.pop(source)
@@ -295,21 +277,42 @@ def normalize_movie(data: dict[str, Any], movie_id: str | None = None) -> dict[s
             movie[field] = []
     for field in BOOLEAN_FIELDS:
         movie[field] = bool(movie.get(field))
+    # PostgreSQL is stricter than SQLite about values stored in TEXT columns.
+    for field in ("name", "brand", "category", "section", "description",
+                  "image_url", "logo_url", "link", "video_url",
+                  "full_movie_url", "rating", "year", "duration", "synopsis"):
+        if movie.get(field) is None:
+            movie[field] = ""
+        elif not isinstance(movie[field], str):
+            movie[field] = str(movie[field])
+    if movie.get("price") is not None and not isinstance(movie["price"], str):
+        movie["price"] = str(movie["price"])
     return movie
 
 
 def movie_values(movie: dict[str, Any]) -> tuple[Any, ...]:
-    return tuple(json.dumps(movie[field]) if field in JSON_FIELDS else int(movie[field]) if field in BOOLEAN_FIELDS else movie.get(field) for field in MOVIE_FIELDS)
+    return tuple(
+        json.dumps(movie[field]) if field in JSON_FIELDS
+        else int(movie[field]) if field in BOOLEAN_FIELDS
+        else movie.get(field)
+        for field in MOVIE_FIELDS
+    )
 
 
-def insert_movie(connection: sqlite3.Connection, movie: dict[str, Any]) -> None:
-    columns = ",".join(f'"{field}"' if field == "cast" else field for field in MOVIE_FIELDS)
-    placeholders = ",".join("?" for _ in MOVIE_FIELDS)
-    connection.execute(f"INSERT OR IGNORE INTO movies ({columns}) VALUES ({placeholders})", movie_values(movie))
+def insert_movie(connection: psycopg.Connection, movie: dict[str, Any]) -> None:
+    columns = ",".join(f'"{field}"' for field in MOVIE_FIELDS)
+    placeholders = ",".join("%s" for _ in MOVIE_FIELDS)
+    connection.execute(
+        f"INSERT INTO movies ({columns}) VALUES ({placeholders}) ON CONFLICT DO NOTHING",
+        movie_values(movie),
+    )
 
 
-def record_log(connection: sqlite3.Connection, event_type: str, details: str, email: str | None = None) -> None:
-    connection.execute("INSERT INTO logs (id, type, details, user_email, timestamp) VALUES (?, ?, ?, ?, ?)", (uuid.uuid4().hex, event_type, details, email, utc_now()))
+def record_log(connection: psycopg.Connection, event_type: str, details: str, email: str | None = None) -> None:
+    connection.execute(
+        "INSERT INTO logs (id, type, details, user_email, timestamp) VALUES (%s, %s, %s, %s, %s)",
+        (uuid.uuid4().hex, event_type, details, email, utc_now()),
+    )
 
 
 async def json_body(request: Request) -> dict[str, Any]:
@@ -322,51 +325,70 @@ async def json_body(request: Request) -> dict[str, Any]:
 
 @app.on_event("startup")
 def startup() -> None:
+    validate_config()
     init_db()
+
+
+@app.get("/")
+def root() -> dict[str, str]:
+    return {"name": "AimeFilms API", "docs": "/docs", "health": "/health"}
 
 
 @app.get("/health")
 @app.get("/api/health")
-def health() -> dict[str, bool]:
-    return {"ok": True}
+def health() -> dict[str, Any]:
+    # Report unhealthy if PostgreSQL is unavailable; a process-only health check
+    # can otherwise make a broken deployment look healthy.
+    try:
+        with db() as connection:
+            connection.execute("SELECT 1")
+    except Exception:
+        raise HTTPException(status_code=503, detail="Database connection is unavailable.")
+    return {"ok": True, "database": "connected"}
 
 
 @app.get("/api/movies")
 def get_movies() -> dict[str, Any]:
-    connection = db()
-    rows = connection.execute(f"SELECT * FROM movies WHERE is_hidden = 0 ORDER BY {MOVIE_ORDER}").fetchall()
-    connection.close()
+    with db() as connection:
+        rows = connection.execute("SELECT * FROM movies WHERE is_hidden = 0 ORDER BY ordinal DESC").fetchall()
     return {"success": True, "movies": [movie_from_row(row) for row in rows]}
 
 
 @app.get("/api/movies/search")
 def search_movies(q: str = "") -> dict[str, Any]:
     query = f"%{q.strip().lower()}%"
-    connection = db()
-    rows = connection.execute(
-        f"SELECT * FROM movies WHERE is_hidden = 0 AND (lower(name) LIKE ? OR lower(description) LIKE ? OR lower(synopsis) LIKE ? OR lower(genre) LIKE ?) ORDER BY {MOVIE_ORDER}",
-        (query, query, query, query),
-    ).fetchall()
-    connection.close()
+    with db() as connection:
+        rows = connection.execute(
+            """SELECT * FROM movies WHERE is_hidden = 0 AND (
+               lower(name) LIKE %s OR lower(description) LIKE %s OR lower(synopsis) LIKE %s OR lower(genre) LIKE %s
+            ) ORDER BY ordinal DESC""",
+            (query, query, query, query),
+        ).fetchall()
     return {"success": True, "movies": [movie_from_row(row) for row in rows]}
 
 
 @app.post("/api/seed")
 async def seed_movies(request: Request) -> dict[str, Any]:
+    # Seed only an empty catalogue. This keeps the existing frontend's initial
+    # catalogue import working; after the first seed this endpoint makes no changes.
     body = await json_body(request)
     movies = body.get("movies", [])
-    connection = db()
-    existing = connection.execute("SELECT COUNT(*) AS count FROM movies").fetchone()["count"]
-    inserted = 0
-    if existing == 0:
-        for value in movies:
-            movie = normalize_movie(value if isinstance(value, dict) else {})
-            insert_movie(connection, movie)
-            inserted += 1
-        record_log(connection, "SYSTEM", f"Database seeded with {inserted} movies")
-    connection.commit()
-    rows = connection.execute("SELECT * FROM movies WHERE is_hidden = 0 ORDER BY rowid DESC").fetchall()
-    connection.close()
+    if not isinstance(movies, list):
+        raise HTTPException(status_code=422, detail="movies must be a list.")
+    if len(movies) > 1000:
+        raise HTTPException(status_code=413, detail="A single seed request may contain at most 1000 movies.")
+    if any(not isinstance(value, dict) for value in movies):
+        raise HTTPException(status_code=422, detail="Every movie must be an object.")
+    with db() as connection:
+        existing = connection.execute("SELECT COUNT(*) AS count FROM movies").fetchone()["count"]
+        inserted = 0
+        if existing == 0:
+            for value in movies:
+                movie = normalize_movie(value if isinstance(value, dict) else {})
+                insert_movie(connection, movie)
+                inserted += 1
+            record_log(connection, "SYSTEM", f"Database seeded with {inserted} movies")
+        rows = connection.execute("SELECT * FROM movies WHERE is_hidden = 0 ORDER BY ordinal DESC").fetchall()
     return {"success": True, "inserted": inserted, "movies": [movie_from_row(row) for row in rows]}
 
 
@@ -375,16 +397,16 @@ async def login(request: Request) -> dict[str, Any]:
     body = await json_body(request)
     identifier = str(body.get("identifier", "")).strip().lower()
     password = str(body.get("password", ""))
-    connection = db()
-    user = connection.execute("SELECT * FROM users WHERE lower(email) = ? OR lower(name) = ?", (identifier, identifier)).fetchone()
-    if not user or user["is_blocked"] or not verify_password(password, user["password_hash"]):
-        connection.close()
-        raise HTTPException(status_code=401, detail="Identity check failed.")
-    record_log(connection, "LOGIN", "User logged in", user["email"])
-    connection.commit()
-    token = encode_token(user)
-    result = public_user(user)
-    connection.close()
+    with db() as connection:
+        user = connection.execute(
+            "SELECT * FROM users WHERE lower(email) = %s OR lower(name) = %s",
+            (identifier, identifier),
+        ).fetchone()
+        if not user or user["is_blocked"] or not verify_password(password, user["password_hash"]):
+            raise HTTPException(status_code=401, detail="Identity check failed.")
+        record_log(connection, "LOGIN", "User logged in", user["email"])
+        result = public_user(user)
+        token = encode_token(user)
     return {"success": True, "token": token, "user": result}
 
 
@@ -394,16 +416,16 @@ async def register(request: Request) -> dict[str, Any]:
     name = str(body.get("name", "")).strip()
     email = str(body.get("email", "")).strip().lower()
     password = str(body.get("password", ""))
-    if not name or not email or len(password) < 6:
-        raise HTTPException(status_code=422, detail="Name, email, and a password of at least six characters are required.")
-    connection = db()
-    if connection.execute("SELECT 1 FROM users WHERE email = ?", (email,)).fetchone():
-        connection.close()
-        raise HTTPException(status_code=409, detail="Email is already in the registry.")
-    connection.execute("INSERT INTO users (email, name, password_hash, role, is_verified, joined_at) VALUES (?, ?, ?, 'user', 1, ?)", (email, name, hash_password(password), utc_now()))
-    record_log(connection, "REGISTER", f"New user registered: {email}", email)
-    connection.commit()
-    connection.close()
+    if not name or len(name) > 120 or len(email) > 254 or not email or not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email) or len(password) < 12 or len(password) > 1024:
+        raise HTTPException(status_code=422, detail="A valid name and email plus a password of 12–1024 characters are required.")
+    with db() as connection:
+        if connection.execute("SELECT 1 FROM users WHERE email = %s", (email,)).fetchone():
+            raise HTTPException(status_code=409, detail="Email is already in the registry.")
+        connection.execute(
+            "INSERT INTO users (email, name, password_hash, role, is_verified, joined_at) VALUES (%s, %s, %s, 'user', 1, %s)",
+            (email, name, hash_password(password), utc_now()),
+        )
+        record_log(connection, "REGISTER", f"New user registered: {email}", email)
     return {"success": True, "message": "Success."}
 
 
@@ -418,78 +440,86 @@ async def track_view(request: Request) -> dict[str, Any]:
         email = current_user(request)["email"]
     except HTTPException:
         pass
-    connection = db()
-    connection.execute("INSERT INTO views (movie_id, view_count, updated_at) VALUES (?, 1, ?) ON CONFLICT(movie_id) DO UPDATE SET view_count = view_count + 1, updated_at = excluded.updated_at", (movie_id, utc_now()))
-    record_log(connection, "VIEW", f"Viewed movie: {movie_id}", email)
-    connection.commit()
-    connection.close()
+    with db() as connection:
+        connection.execute(
+            """INSERT INTO views (movie_id, view_count, updated_at) VALUES (%s, 1, %s)
+               ON CONFLICT (movie_id) DO UPDATE SET view_count = views.view_count + 1, updated_at = EXCLUDED.updated_at""",
+            (movie_id, utc_now()),
+        )
+        record_log(connection, "VIEW", f"Viewed movie: {movie_id}", email)
     return {"success": True}
 
 
 @app.get("/api/admin/analytics")
 def analytics(request: Request) -> dict[str, Any]:
     admin_user(request)
-    connection = db()
-    movies = connection.execute("SELECT * FROM movies").fetchall()
-    top_rows = connection.execute("SELECT movie_id, view_count FROM views ORDER BY view_count DESC LIMIT 10").fetchall()
-    movie_map = {row["id"]: movie_from_row(row) for row in movies}
-    top_movies = []
-    for row in top_rows:
-        movie = movie_map.get(row["movie_id"], {})
-        top_movies.append({"id": row["movie_id"], "name": movie.get("name", "Unknown Asset"), "views": row["view_count"], "brand": movie.get("brand", "aimefilms"), "rating": float(movie.get("rating", 0) or 0), "engagement": min(100, row["view_count"] * 5)})
-    brand_stats = {brand: {"views": 0, "movies": sum(1 for movie in movie_map.values() if movie.get("brand") == brand)} for brand in ("aimefilms", "filmsnyarwanda", "princefilms")}
-    for row in connection.execute("SELECT movie_id, view_count FROM views").fetchall():
-        brand = movie_map.get(row["movie_id"], {}).get("brand")
-        if brand in brand_stats:
-            brand_stats[brand]["views"] += row["view_count"]
-    users = [public_user(row) for row in connection.execute("SELECT * FROM users ORDER BY joined_at DESC LIMIT 10").fetchall()]
-    logs = [dict(row) for row in connection.execute("SELECT id, type, details, user_email AS userEmail, timestamp FROM logs ORDER BY timestamp DESC LIMIT 20").fetchall()]
-    total_views = connection.execute("SELECT COALESCE(SUM(view_count), 0) AS total FROM views").fetchone()["total"]
-    connection.close()
-    return {"success": True, "analytics": {"topMovies": top_movies, "totalViews": total_views, "newUsers": users, "recentActivity": logs, "brandStats": brand_stats}}
+    with db() as connection:
+        movies = connection.execute("SELECT * FROM movies").fetchall()
+        top_rows = connection.execute("SELECT movie_id, view_count FROM views ORDER BY view_count DESC LIMIT 10").fetchall()
+        movie_map = {row["id"]: movie_from_row(row) for row in movies}
+        top_movies = []
+        for row in top_rows:
+            movie = movie_map.get(row["movie_id"], {})
+            top_movies.append({
+                "id": row["movie_id"], "name": movie.get("name", "Unknown Asset"), "views": row["view_count"],
+                "brand": movie.get("brand", "aimefilms"), "rating": float(movie.get("rating", 0) or 0),
+                "engagement": min(100, row["view_count"] * 5),
+            })
+        brand_stats = {
+            brand: {"views": 0, "movies": sum(1 for movie in movie_map.values() if movie.get("brand") == brand)}
+            for brand in ("aimefilms", "filmsnyarwanda", "princefilms")
+        }
+        for row in connection.execute("SELECT movie_id, view_count FROM views").fetchall():
+            brand = movie_map.get(row["movie_id"], {}).get("brand")
+            if brand in brand_stats:
+                brand_stats[brand]["views"] += row["view_count"]
+        users = [public_user(row) for row in connection.execute("SELECT * FROM users ORDER BY joined_at DESC LIMIT 10").fetchall()]
+        logs = [dict(row) for row in connection.execute(
+            "SELECT id, type, details, user_email AS \"userEmail\", timestamp FROM logs ORDER BY timestamp DESC LIMIT 20"
+        ).fetchall()]
+        total_views = connection.execute("SELECT COALESCE(SUM(view_count), 0) AS total FROM views").fetchone()["total"]
+    return {"success": True, "analytics": {
+        "topMovies": top_movies, "totalViews": total_views, "newUsers": users,
+        "recentActivity": logs, "brandStats": brand_stats,
+    }}
 
 
 @app.get("/api/admin/users")
 def admin_users(request: Request) -> dict[str, Any]:
     admin_user(request)
-    connection = db()
-    users = [public_user(row) for row in connection.execute("SELECT * FROM users ORDER BY joined_at DESC").fetchall()]
-    connection.close()
+    with db() as connection:
+        users = [public_user(row) for row in connection.execute("SELECT * FROM users ORDER BY joined_at DESC").fetchall()]
     return {"success": True, "users": users}
 
 
 @app.post("/api/admin/users/{email}/toggle-block")
 def toggle_block(email: str, request: Request) -> dict[str, Any]:
     admin_user(request)
-    connection = db()
-    user = connection.execute("SELECT is_blocked FROM users WHERE email = ?", (email.lower(),)).fetchone()
-    if not user:
-        connection.close()
-        raise HTTPException(status_code=404, detail="User not found.")
-    blocked = not bool(user["is_blocked"])
-    connection.execute("UPDATE users SET is_blocked = ? WHERE email = ?", (int(blocked), email.lower()))
-    record_log(connection, "BLOCK", f"{'Blocked' if blocked else 'Unblocked'} user: {email}")
-    connection.commit()
-    connection.close()
+    with db() as connection:
+        user = connection.execute("SELECT is_blocked FROM users WHERE email = %s", (email.lower(),)).fetchone()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found.")
+        blocked = not bool(user["is_blocked"])
+        connection.execute("UPDATE users SET is_blocked = %s WHERE email = %s", (int(blocked), email.lower()))
+        record_log(connection, "BLOCK", f"{'Blocked' if blocked else 'Unblocked'} user: {email}")
     return {"success": True, "isBlocked": blocked}
 
 
 @app.get("/api/admin/logs")
 def get_logs(request: Request) -> dict[str, Any]:
     admin_user(request)
-    connection = db()
-    rows = connection.execute("SELECT id, type, details, user_email AS userEmail, timestamp FROM logs ORDER BY timestamp DESC").fetchall()
-    connection.close()
+    with db() as connection:
+        rows = connection.execute(
+            "SELECT id, type, details, user_email AS \"userEmail\", timestamp FROM logs ORDER BY timestamp DESC"
+        ).fetchall()
     return {"success": True, "logs": [dict(row) for row in rows]}
 
 
 @app.delete("/api/admin/logs")
 def clear_logs(request: Request) -> dict[str, Any]:
     admin_user(request)
-    connection = db()
-    connection.execute("DELETE FROM logs")
-    connection.commit()
-    connection.close()
+    with db() as connection:
+        connection.execute("DELETE FROM logs")
     return {"success": True}
 
 
@@ -497,141 +527,125 @@ def clear_logs(request: Request) -> dict[str, Any]:
 async def add_movie(request: Request) -> dict[str, Any]:
     admin_user(request)
     movie = normalize_movie(await json_body(request))
-    connection = db()
-    insert_movie(connection, movie)
-    record_log(connection, "UPLOAD", f"Uploaded movie: {movie['name']}")
-    connection.commit()
-    connection.close()
+    with db() as connection:
+        insert_movie(connection, movie)
+        record_log(connection, "UPLOAD", f"Uploaded movie: {movie['name']}")
     return {"success": True, "movie": movie}
 
 
 @app.put("/api/admin/movies/{movie_id}")
 async def update_movie(movie_id: str, request: Request) -> dict[str, Any]:
     admin_user(request)
-    connection = db()
-    existing = connection.execute("SELECT * FROM movies WHERE id = ?", (movie_id,)).fetchone()
-    if not existing:
-        connection.close()
-        raise HTTPException(status_code=404, detail="Movie not found.")
-    current = movie_from_row(existing)
-    current.update(await json_body(request))
-    movie = normalize_movie(current, movie_id)
-    fields = [field for field in MOVIE_FIELDS if field != "id"]
-    assignments = ",".join(f'"{field}" = ?' if field == "cast" else f"{field} = ?" for field in fields)
-    values = movie_values(movie)
-    connection.execute(f"UPDATE movies SET {assignments} WHERE id = ?", tuple(values[MOVIE_FIELDS.index(field)] for field in fields) + (movie_id,))
-    connection.commit()
-    connection.close()
+    with db() as connection:
+        existing = connection.execute("SELECT * FROM movies WHERE id = %s", (movie_id,)).fetchone()
+        if not existing:
+            raise HTTPException(status_code=404, detail="Movie not found.")
+        current = movie_from_row(existing)
+        current.update(await json_body(request))
+        movie = normalize_movie(current, movie_id)
+        fields = [field for field in MOVIE_FIELDS if field != "id"]
+        assignments = ",".join(f'"{field}" = %s' for field in fields)
+        values = movie_values(movie)
+        connection.execute(
+            f"UPDATE movies SET {assignments} WHERE id = %s",
+            tuple(values[MOVIE_FIELDS.index(field)] for field in fields) + (movie_id,),
+        )
     return {"success": True, "movie": movie}
 
 
 @app.delete("/api/admin/movies/{movie_id}")
 def delete_movie(movie_id: str, request: Request) -> dict[str, Any]:
     admin_user(request)
-    connection = db()
-    connection.execute("DELETE FROM movies WHERE id = ?", (movie_id,))
-    connection.execute("DELETE FROM views WHERE movie_id = ?", (movie_id,))
-    connection.execute("DELETE FROM user_lists WHERE movie_id = ?", (movie_id,))
-    record_log(connection, "DELETE", f"Deleted movie: {movie_id}")
-    connection.commit()
-    connection.close()
+    with db() as connection:
+        connection.execute("DELETE FROM movies WHERE id = %s", (movie_id,))
+        connection.execute("DELETE FROM views WHERE movie_id = %s", (movie_id,))
+        connection.execute("DELETE FROM user_lists WHERE movie_id = %s", (movie_id,))
+        record_log(connection, "DELETE", f"Deleted movie: {movie_id}")
     return {"success": True}
 
 
 @app.get("/api/admin/messages")
 def admin_messages(request: Request) -> dict[str, Any]:
     admin_user(request)
-    connection = db()
-    rows = connection.execute("SELECT id, to_email AS toEmail, from_name AS fromName, subject, body, timestamp, is_read AS isRead FROM messages ORDER BY timestamp DESC").fetchall()
-    connection.close()
+    with db() as connection:
+        rows = connection.execute(
+            """SELECT id, to_email AS \"toEmail\", from_name AS \"fromName\", subject, body,
+               timestamp, is_read AS \"isRead\" FROM messages ORDER BY timestamp DESC"""
+        ).fetchall()
     return {"success": True, "messages": [dict(row) for row in rows]}
-
-
-
-@app.post("/api/feedback")
-async def submit_feedback(request: Request) -> dict[str, Any]:
-    body = await json_body(request)
-    name = str(body.get("name", "Website visitor")).strip()[:100] or "Website visitor"
-    email = str(body.get("email", "")).strip().lower()[:254]
-    category = str(body.get("category", "Other")).strip()
-    subject = str(body.get("subject", "")).strip()
-    message = str(body.get("body", body.get("message", ""))).strip()
-
-    allowed_categories = {"Technical Support", "Content Request", "Account Issue", "Other Intelligence"}
-    if category not in allowed_categories:
-        category = "Other Intelligence"
-    if email and ("@" not in email or email.startswith("@") or email.endswith("@")):
-        raise HTTPException(status_code=422, detail="Enter a valid email address.")
-    if not subject or len(subject) > 180:
-        raise HTTPException(status_code=422, detail="Subject is required and must be at most 180 characters.")
-    if len(message) < 5 or len(message) > 5000:
-        raise HTTPException(status_code=422, detail="Message must be between 5 and 5000 characters.")
-
-    message_id = uuid.uuid4().hex
-    from_name = f"{name} <{email}>" if email else name
-    feedback_subject = f"[Feedback: {category}] {subject}"[:240]
-    recipient = ADMIN_EMAIL or "admin@aimefilms.local"
-    connection = db()
-    connection.execute(
-        "INSERT INTO messages (id, to_email, from_name, subject, body, timestamp, is_read) VALUES (?, ?, ?, ?, ?, ?, 0)",
-        (message_id, recipient, from_name, feedback_subject, message, utc_now()),
-    )
-    record_log(connection, "FEEDBACK", f"Website feedback received: {subject}", email or None)
-    connection.commit()
-    connection.close()
-    return {"success": True, "id": message_id, "message": "Feedback delivered to the admin inbox."}
 
 
 @app.post("/api/messages")
 async def send_message(request: Request) -> dict[str, Any]:
     user = current_user(request)
     body = await json_body(request)
+    to_email = str(body.get("toEmail", "")).strip().lower()
+    subject = str(body.get("subject", "")).strip()
+    message_body = str(body.get("body", "")).strip()
+    if not to_email or not subject or not message_body:
+        raise HTTPException(status_code=422, detail="Recipient, subject, and message are required.")
+    if len(subject) > 200 or len(message_body) > 10000:
+        raise HTTPException(status_code=413, detail="Subject or message is too long.")
     message_id = uuid.uuid4().hex
-    connection = db()
-    connection.execute("INSERT INTO messages (id, to_email, from_name, subject, body, timestamp) VALUES (?, ?, ?, ?, ?, ?)", (message_id, str(body.get("toEmail", "")), str(body.get("fromName", user["name"])), str(body.get("subject", "")), str(body.get("body", "")), utc_now()))
-    record_log(connection, "MESSAGE", f"Message sent to {body.get('toEmail', '')}", user["email"])
-    connection.commit()
-    connection.close()
+    with db() as connection:
+        recipient = connection.execute("SELECT email FROM users WHERE lower(email) = %s", (to_email,)).fetchone()
+        if not recipient:
+            raise HTTPException(status_code=404, detail="Recipient account was not found.")
+        connection.execute(
+            "INSERT INTO messages (id, to_email, from_name, subject, body, timestamp) VALUES (%s, %s, %s, %s, %s, %s)",
+            (message_id, to_email, user["name"], subject, message_body, utc_now()),
+        )
+        record_log(connection, "MESSAGE", f"Message sent to {to_email}", user["email"])
     return {"success": True, "id": message_id}
 
 
 @app.get("/api/messages")
 def get_messages(request: Request) -> dict[str, Any]:
     user = current_user(request)
-    connection = db()
-    rows = connection.execute("SELECT id, to_email AS toEmail, from_name AS fromName, subject, body, timestamp, is_read AS isRead FROM messages WHERE lower(to_email) = lower(?) ORDER BY timestamp DESC", (user["email"],)).fetchall()
-    connection.close()
+    with db() as connection:
+        rows = connection.execute(
+            """SELECT id, to_email AS \"toEmail\", from_name AS \"fromName\", subject, body,
+               timestamp, is_read AS \"isRead\" FROM messages WHERE lower(to_email) = lower(%s) ORDER BY timestamp DESC""",
+            (user["email"],),
+        ).fetchall()
     return {"success": True, "messages": [{**dict(row), "isRead": bool(row["isRead"])} for row in rows]}
 
 
 @app.post("/api/messages/{message_id}/read")
 def mark_message_read(message_id: str, request: Request) -> dict[str, Any]:
     user = current_user(request)
-    connection = db()
-    connection.execute("UPDATE messages SET is_read = 1 WHERE id = ? AND lower(to_email) = lower(?)", (message_id, user["email"]))
-    connection.commit()
-    connection.close()
+    with db() as connection:
+        connection.execute(
+            "UPDATE messages SET is_read = 1 WHERE id = %s AND lower(to_email) = lower(%s)",
+            (message_id, user["email"]),
+        )
     return {"success": True}
 
 
 @app.delete("/api/messages/{message_id}")
 def delete_message(message_id: str, request: Request) -> dict[str, Any]:
     user = current_user(request)
-    connection = db()
-    connection.execute("DELETE FROM messages WHERE id = ? AND lower(to_email) = lower(?)", (message_id, user["email"]))
-    connection.commit()
-    connection.close()
+    with db() as connection:
+        connection.execute(
+            "DELETE FROM messages WHERE id = %s AND lower(to_email) = lower(%s)",
+            (message_id, user["email"]),
+        )
     return {"success": True}
 
 
 def replace_list(request: Request, list_type: str, ids: list[str]) -> dict[str, Any]:
     user = current_user(request)
-    connection = db()
-    connection.execute("DELETE FROM user_lists WHERE email = ? AND list_type = ?", (user["email"], list_type))
-    for movie_id in ids:
-        connection.execute("INSERT OR IGNORE INTO user_lists (email, list_type, movie_id, created_at) VALUES (?, ?, ?, ?)", (user["email"], list_type, str(movie_id), utc_now()))
-    connection.commit()
-    connection.close()
+    if not isinstance(ids, list) or len(ids) > 500 or any(not isinstance(value, (str, int)) for value in ids):
+        raise HTTPException(status_code=422, detail="ids must be a list of at most 500 movie IDs.")
+    ids = [str(value) for value in ids]
+    with db() as connection:
+        connection.execute("DELETE FROM user_lists WHERE email = %s AND list_type = %s", (user["email"], list_type))
+        for movie_id in ids:
+            connection.execute(
+                """INSERT INTO user_lists (email, list_type, movie_id, created_at)
+                   VALUES (%s, %s, %s, %s) ON CONFLICT DO NOTHING""",
+                (user["email"], list_type, str(movie_id), utc_now()),
+            )
     return {"success": True, "ids": ids}
 
 
@@ -644,9 +658,11 @@ async def set_watchlist(request: Request) -> dict[str, Any]:
 @app.get("/api/watchlist")
 def get_watchlist(request: Request) -> dict[str, Any]:
     user = current_user(request)
-    connection = db()
-    rows = connection.execute("SELECT movie_id FROM user_lists WHERE email = ? AND list_type = ? ORDER BY created_at", (user["email"], "watchlist")).fetchall()
-    connection.close()
+    with db() as connection:
+        rows = connection.execute(
+            "SELECT movie_id FROM user_lists WHERE email = %s AND list_type = %s ORDER BY created_at",
+            (user["email"], "watchlist"),
+        ).fetchall()
     return {"success": True, "ids": [row["movie_id"] for row in rows]}
 
 
@@ -659,9 +675,11 @@ async def set_continue_watching(request: Request) -> dict[str, Any]:
 @app.get("/api/continue-watching")
 def get_continue_watching(request: Request) -> dict[str, Any]:
     user = current_user(request)
-    connection = db()
-    rows = connection.execute("SELECT movie_id FROM user_lists WHERE email = ? AND list_type = ? ORDER BY created_at", (user["email"], "continue")).fetchall()
-    connection.close()
+    with db() as connection:
+        rows = connection.execute(
+            "SELECT movie_id FROM user_lists WHERE email = %s AND list_type = %s ORDER BY created_at",
+            (user["email"], "continue"),
+        ).fetchall()
     return {"success": True, "ids": [row["movie_id"] for row in rows]}
 
 
@@ -669,10 +687,9 @@ def get_continue_watching(request: Request) -> dict[str, Any]:
 async def update_profile(request: Request) -> dict[str, Any]:
     user = current_user(request)
     body = await json_body(request)
-    connection = db()
-    connection.execute("UPDATE users SET name = ?, avatar = ? WHERE email = ?", (str(body.get("name", user["name"])), body.get("avatar"), user["email"]))
-    connection.commit()
-    connection.close()
+    with db() as connection:
+        connection.execute(
+            "UPDATE users SET name = %s, avatar = %s WHERE email = %s",
+            (str(body.get("name", user["name"])), body.get("avatar"), user["email"]),
+        )
     return {"success": True}
-
-
