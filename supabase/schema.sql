@@ -90,7 +90,7 @@ VALUES (
   'aimefilms-videos',
   'aimefilms-videos',
   TRUE,
-  52428800,
+  3900000000,
   ARRAY['video/mp4', 'video/webm', 'video/quicktime', 'video/x-matroska']
 )
 ON CONFLICT (id) DO UPDATE SET
