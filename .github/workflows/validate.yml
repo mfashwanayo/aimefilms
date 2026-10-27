@@ -1,0 +1,58 @@
+name: Validate AimeFilms
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend-python
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements.txt
+      - run: python -m py_compile app.py
+      - name: Verify API route registration
+        env:
+          DB_PATH: ${{ runner.temp }}/aimefilms-ci.sqlite
+          ADMIN_NAME: ci-admin
+          ADMIN_EMAIL: ci-admin@example.com
+          ADMIN_PASSWORD: ci-only-password
+          TOKEN_SECRET: ci-only-token-secret
+        run: |
+          python - <<'PY'
+          from app import app
+          paths = {route.path for route in app.routes}
+          required = {
+              "/health",
+              "/api/feedback",
+              "/api/admin/messages",
+              "/api/auth/login",
+              "/api/movies",
+          }
+          missing = required - paths
+          assert not missing, f"Missing API routes: {sorted(missing)}"
+          print(f"Verified {len(required)} required API routes")
+          PY
