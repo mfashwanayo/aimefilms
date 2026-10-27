@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { User, Language, Brand } from '../types';
-import { AimeFilmsAPI, MASTER_ADMIN_CREDENTIALS } from '../services/api';
+import { AimeFilmsAPI } from '../services/api';
 import { translations } from '../locales/translations';
 import Logo from './Logo';
 
