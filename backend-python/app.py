@@ -43,8 +43,8 @@ SUPABASE_VIDEO_BUCKET = os.getenv("SUPABASE_VIDEO_BUCKET", "aimefilms-videos").s
 try:
     MAX_VIDEO_UPLOAD_MB = max(1, int(os.getenv("MAX_VIDEO_UPLOAD_MB", "3900")))
 except ValueError:
-    MAX_VIDEO_UPLOAD_MB = 50
-MAX_VIDEO_UPLOAD_BYTES = MAX_VIDEO_UPLOAD_MB * 1024 * 1024
+    MAX_VIDEO_UPLOAD_MB = 3900
+MAX_VIDEO_UPLOAD_BYTES = MAX_VIDEO_UPLOAD_MB * 1_000_000
 VIDEO_MIME_BY_EXTENSION = {
     ".mp4": "video/mp4",
     ".webm": "video/webm",
