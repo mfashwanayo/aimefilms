@@ -18,7 +18,8 @@ from dotenv import load_dotenv
 import psycopg
 import requests
 from psycopg.rows import dict_row
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.security import HTTPBearer
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -62,6 +63,8 @@ app = FastAPI(
     version="1.0.0",
     description="Backend API for the AimeFilms movie catalogue, accounts, watchlists, messages, and admin tools.",
 )
+
+video_upload_bearer = HTTPBearer(auto_error=False)
 
 @app.middleware("http")
 async def reject_oversized_video_uploads(request: Request, call_next):
@@ -568,6 +571,7 @@ def upload_video(
     file: UploadFile = File(..., description="MP4, WebM, MOV, or MKV video file"),
     movie_id: str | None = Form(default=None, description="Optional existing movie ID to update"),
     field: str = Form(default="fullMovieUrl", description="Either fullMovieUrl or videoUrl"),
+    bearer_credentials: Any = Depends(video_upload_bearer),
 ) -> dict[str, Any]:
     """Upload a video to Supabase Storage. Only authenticated admins may upload."""
     user = admin_user(request)
