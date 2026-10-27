@@ -92,3 +92,20 @@ Then open the frontend, test registration/login, and test an admin action. If th
 - The `schema.sql` enables Row Level Security on the tables and defines no anonymous read policies. The frontend must access data through the FastAPI backend, not direct table queries.
 - Rotate the exposed admin password immediately. Deleting it from the latest source does not erase it from old Git history. If the repository was public while the credential was present, consider cleaning the history after rotation.
 - The one-time `/api/seed` endpoint remains for the existing frontend's initial catalogue seeding behavior. It only inserts when the movie table is empty; review/disable that behavior if you want all catalogue seeding to require an explicit administrator action.
+
+## Video uploads
+
+The Supabase Storage bucket `aimefilms-videos` is publicly readable for movie playback, with uploads restricted to the trusted FastAPI server. The bucket allows MP4, WebM, MOV and MKV files up to 50 MB per file, the current Free plan's documented maximum. See the [Supabase file-size limits](https://supabase.com/docs/guides/storage/uploads/file-limits).
+
+Set the following additional backend environment variables in Render:
+
+| Key | Value |
+|---|---|
+| `SUPABASE_URL` | `https://fadsjkoaoxbtigelhcna.supabase.co` |
+| `SUPABASE_SERVICE_ROLE_KEY` | Server-side service-role key from Supabase API Keys; never expose it in frontend code or commit it |
+| `SUPABASE_VIDEO_BUCKET` | `aimefilms-videos` |
+| `MAX_VIDEO_UPLOAD_MB` | `50` |
+
+After deployment, open `https://YOUR-BACKEND.onrender.com/docs`, authorize with an admin bearer token, and call `POST /api/admin/videos/upload`. Select `file`, optionally set `movie_id` to update an existing movie, and set `field` to `fullMovieUrl` or `videoUrl`. If `movie_id` is omitted, the endpoint returns a public URL so it can be saved with movie metadata later. Uploaded videos are publicly readable by anyone who has the URL.
+
+For videos larger than 50 MB, increase the Supabase Storage global and bucket limits after checking plan eligibility, then increase the backend limit too. Resumable TUS uploads are recommended for larger video assets. See [Supabase standard uploads](https://supabase.com/docs/guides/storage/uploads/standard-uploads).
