@@ -82,3 +82,18 @@ ALTER TABLE public.views ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.messages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.user_lists ENABLE ROW LEVEL SECURITY;
+
+-- Publicly readable streaming assets; uploads are performed only by the
+-- trusted FastAPI backend using SUPABASE_SERVICE_ROLE_KEY.
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES (
+  'aimefilms-videos',
+  'aimefilms-videos',
+  TRUE,
+  52428800,
+  ARRAY['video/mp4', 'video/webm', 'video/quicktime', 'video/x-matroska']
+)
+ON CONFLICT (id) DO UPDATE SET
+  public = EXCLUDED.public,
+  file_size_limit = EXCLUDED.file_size_limit,
+  allowed_mime_types = EXCLUDED.allowed_mime_types;
