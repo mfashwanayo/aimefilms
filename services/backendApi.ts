@@ -159,6 +159,9 @@ export async function backendUploadVideo(
     }
     if (!createResponse.ok) {
         const detail = await createResponse.text();
+        if (createResponse.status === 413 || /entity.?too.?large|file.?size.?limit/i.test(detail)) {
+            throw new Error('Supabase rejected this video because the project global upload limit is still 50 MB. Upgrade the Supabase plan and raise Storage → Settings → Global file size limit to at least 3.9 GB.');
+        }
         throw new Error(readableUploadError(detail, 'Could not start the resumable upload.'));
     }
     const location = createResponse.headers.get('Location');
@@ -193,7 +196,9 @@ export async function backendUploadVideo(
                     uploadedChunk = true;
                 } else {
                     const detail = await patchResponse.text();
-                    lastError = readableUploadError(detail, 'Storage returned HTTP ' + patchResponse.status + '.');
+                    lastError = patchResponse.status === 413
+                        ? 'Supabase rejected the file size. The project may still have a 50 MB global file limit; upgrade the plan and raise Storage → Settings → Global file size limit.'
+                        : readableUploadError(detail, 'Storage returned HTTP ' + patchResponse.status + '.');
                     if (patchResponse.status < 500 && patchResponse.status !== 409 && patchResponse.status !== 408 && patchResponse.status !== 429) {
                         throw new Error(lastError);
                     }
