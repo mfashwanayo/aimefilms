@@ -93,19 +93,22 @@ Then open the frontend, test registration/login, and test an admin action. If th
 - Rotate the exposed admin password immediately. Deleting it from the latest source does not erase it from old Git history. If the repository was public while the credential was present, consider cleaning the history after rotation.
 - The one-time `/api/seed` endpoint remains for the existing frontend's initial catalogue seeding behavior. It only inserts when the movie table is empty; review/disable that behavior if you want all catalogue seeding to require an explicit administrator action.
 
-## Video uploads
+## Video uploads (resumable, 3.9 GB target)
 
-The Supabase Storage bucket `aimefilms-videos` is publicly readable for movie playback, with uploads restricted to the trusted FastAPI server. The bucket allows MP4, WebM, MOV and MKV files up to 50 MB per file, the current Free plan's documented maximum. See the [Supabase file-size limits](https://supabase.com/docs/guides/storage/uploads/file-limits).
+The admin form uploads video files directly from the browser to Supabase Storage using resumable TUS chunks, so the multi-GB file does not pass through Render. Storage keys use the virtual folder `films/<movie-id>/<generated-file-name>` inside the `aimefilms-videos` bucket. After a successful upload, FastAPI verifies the object and immediately writes the public URL into the movie's `video_url` or `full_movie_url` database column.
 
-Set the following additional backend environment variables in Render:
+Supported formats: MP4, WebM, MOV and MKV. The application target is 3.9 GB (3,900,000,000 bytes). Supabase recommends resumable uploads for large files and uses 6 MiB chunks; see the [Supabase resumable upload guide](https://supabase.com/docs/guides/storage/uploads/resumable-uploads).
+
+**Important current-plan limit:** this project is on Supabase Free, whose global file limit cannot exceed 50 MB. I set the bucket-level target to 3.9 GB, but the global Free-plan limit still rejects files over 50 MB. To enable real 3.9 GB uploads, upgrade the project to Pro or a compatible plan and then open **Supabase → Storage → Settings** and raise the **Global file size limit** to at least 3.9 GB. The bucket limit cannot override the global limit. See [Supabase file limits](https://supabase.com/docs/guides/storage/uploads/file-limits).
+
+Add the following in Render's backend service Environment settings:
 
 | Key | Value |
 |---|---|
 | `SUPABASE_URL` | `https://fadsjkoaoxbtigelhcna.supabase.co` |
-| `SUPABASE_SERVICE_ROLE_KEY` | Server-side service-role key from Supabase API Keys; never expose it in frontend code or commit it |
+| `SUPABASE_SERVICE_ROLE_KEY` | Private server-side key from Supabase; never expose or commit it |
+| `SUPABASE_PUBLISHABLE_KEY` | The project's public/publishable API key |
 | `SUPABASE_VIDEO_BUCKET` | `aimefilms-videos` |
-| `MAX_VIDEO_UPLOAD_MB` | `50` |
+| `MAX_VIDEO_UPLOAD_MB` | `3900` |
 
-After deployment, open `https://YOUR-BACKEND.onrender.com/docs`, authorize with an admin bearer token, and call `POST /api/admin/videos/upload`. Select `file`, optionally set `movie_id` to update an existing movie, and set `field` to `fullMovieUrl` or `videoUrl`. If `movie_id` is omitted, the endpoint returns a public URL so it can be saved with movie metadata later. Uploaded videos are publicly readable by anyone who has the URL.
-
-For videos larger than 50 MB, increase the Supabase Storage global and bucket limits after checking plan eligibility, then increase the backend limit too. Resumable TUS uploads are recommended for larger video assets. See [Supabase standard uploads](https://supabase.com/docs/guides/storage/uploads/standard-uploads).
+After those values are set and the backend is deployed, sign in as admin, open **Film Inventory → Upload New Film**, choose a trailer or full movie file, and click **Commit to Database**. The UI displays progress and retries chunks after transient network errors. Videos are publicly readable for playback, so only upload content you have rights to distribute.
