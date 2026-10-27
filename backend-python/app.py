@@ -56,6 +56,13 @@ FRONTEND_ORIGINS = [
     if origin.strip()
 ]
 
+
+app = FastAPI(
+    title="AimeFilms API",
+    version="1.0.0",
+    description="Backend API for the AimeFilms movie catalogue, accounts, watchlists, messages, and admin tools.",
+)
+
 @app.middleware("http")
 async def reject_oversized_video_uploads(request: Request, call_next):
     """Reject oversized uploads early when Content-Length is supplied."""
@@ -75,12 +82,6 @@ async def reject_oversized_video_uploads(request: Request, call_next):
                 return JSONResponse(status_code=400, content={"success": False, "message": "Invalid Content-Length."})
     return await call_next(request)
 
-
-app = FastAPI(
-    title="AimeFilms API",
-    version="1.0.0",
-    description="Backend API for the AimeFilms movie catalogue, accounts, watchlists, messages, and admin tools.",
-)
 
 @app.exception_handler(HTTPException)
 async def http_error_response(request: Request, exc: HTTPException) -> JSONResponse:
