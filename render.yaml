@@ -27,4 +27,6 @@ services:
       - key: SUPABASE_VIDEO_BUCKET
         value: aimefilms-videos
       - key: MAX_VIDEO_UPLOAD_MB
-        value: "50"
+        value: "3900"
+      - key: SUPABASE_PUBLISHABLE_KEY
+        sync: false
