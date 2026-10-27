@@ -1,0 +1,30 @@
+name: Backend checks
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend-python/**"
+      - ".github/workflows/backend-check.yml"
+  pull_request:
+    paths:
+      - "backend-python/**"
+      - ".github/workflows/backend-check.yml"
+
+jobs:
+  validate-fastapi:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install backend dependencies
+        run: python -m pip install -r backend-python/requirements.txt
+      - name: Compile Python source
+        run: python -m py_compile backend-python/app.py
+      - name: Verify upload API route registration
+        working-directory: backend-python
+        run: python -c "from app import app; paths = {route.path for route in app.routes}; assert '/api/admin/videos/upload' in paths; print('Video upload route registered')"
