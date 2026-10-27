@@ -57,3 +57,20 @@ Configure these private backend environment variables in Render: `DATABASE_URL`,
 - The administrator password previously exposed in frontend code should be rotated. The frontend no longer verifies logins locally when the backend is unavailable.
 - Existing SQLite data is not automatically imported. Back up and migrate any data you need to retain.
 - For a live deployment, verify `/health`, then test registration, login, movies and admin routes.
+
+
+## Upload videos from the admin dashboard
+
+The admin movie form can upload a trailer and/or a full movie directly to Supabase Storage using resumable TUS chunks. Files are placed under the Storage path `films/<movie-id>/<generated-file-name>`, and when an upload completes, the corresponding `videoUrl` or `fullMovieUrl` field is saved in PostgreSQL immediately.
+
+Supported formats: MP4, WebM, MOV and MKV. Application limit: 3.9 GB (3,900,000,000 bytes). Large files upload directly from the browser to Storage; they do not pass through Render.
+
+Required additional backend environment variables:
+
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY` — private, server-side only
+- `SUPABASE_PUBLISHABLE_KEY` — public/publishable API key
+- `SUPABASE_VIDEO_BUCKET=aimefilms-videos`
+- `MAX_VIDEO_UPLOAD_MB=3900`
+
+**Plan limit:** the current Supabase Free project is limited to 50 MB per file. To actually accept videos up to 3.9 GB, upgrade the Supabase project to Pro (or another plan that supports the size), then set Storage's Global file size limit to at least 3.9 GB. The bucket-level limit and backend variable alone cannot override the global plan limit.
