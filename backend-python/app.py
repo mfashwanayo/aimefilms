@@ -12,7 +12,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import parse_qs, quote, urlparse
 
 from dotenv import load_dotenv
 import psycopg
@@ -38,9 +38,10 @@ TOKEN_TTL_SECONDS = 60 * 60 * 24 * 7
 # Video uploads use Supabase Storage. Keep this key private and server-side.
 SUPABASE_URL = os.getenv("SUPABASE_URL", "").strip().rstrip("/")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
+SUPABASE_PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY", "").strip()
 SUPABASE_VIDEO_BUCKET = os.getenv("SUPABASE_VIDEO_BUCKET", "aimefilms-videos").strip()
 try:
-    MAX_VIDEO_UPLOAD_MB = max(1, int(os.getenv("MAX_VIDEO_UPLOAD_MB", "50")))
+    MAX_VIDEO_UPLOAD_MB = max(1, int(os.getenv("MAX_VIDEO_UPLOAD_MB", "3900")))
 except ValueError:
     MAX_VIDEO_UPLOAD_MB = 50
 MAX_VIDEO_UPLOAD_BYTES = MAX_VIDEO_UPLOAD_MB * 1024 * 1024
@@ -563,6 +564,155 @@ def clear_logs(request: Request) -> dict[str, Any]:
     with db() as connection:
         connection.execute("DELETE FROM logs")
     return {"success": True}
+
+
+@app.post("/api/admin/videos/create-upload")
+async def create_video_upload(request: Request) -> dict[str, Any]:
+    """Mint a short-lived, single-object signed token for direct resumable upload."""
+    user = admin_user(request)
+    body = await json_body(request)
+    movie_id = str(body.get("movieId", "")).strip()
+    filename = Path(str(body.get("filename", "video.mp4"))).name
+    content_type = str(body.get("contentType", "")).split(";", 1)[0].strip().lower()
+    try:
+        size_bytes = int(body.get("sizeBytes", 0))
+    except (ValueError, TypeError):
+        size_bytes = 0
+    field = str(body.get("field", "fullMovieUrl"))
+
+    field_to_column = {"videoUrl": "video_url", "fullMovieUrl": "full_movie_url"}
+    if field not in field_to_column:
+        raise HTTPException(status_code=422, detail="field must be videoUrl or fullMovieUrl.")
+    if not movie_id or len(movie_id) > 128:
+        raise HTTPException(status_code=422, detail="A valid movieId is required.")
+    if size_bytes <= 0 or size_bytes > MAX_VIDEO_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Video must be between 1 byte and {MAX_VIDEO_UPLOAD_MB} MB.",
+        )
+
+    extension = Path(filename).suffix.lower()
+    expected_content_type = VIDEO_MIME_BY_EXTENSION.get(extension)
+    if not expected_content_type:
+        raise HTTPException(status_code=415, detail="Supported video files: MP4, WebM, MOV, MKV.")
+    if content_type not in ("", "application/octet-stream", expected_content_type):
+        raise HTTPException(status_code=415, detail="Video content type does not match its file extension.")
+
+    if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY or not SUPABASE_PUBLISHABLE_KEY:
+        raise HTTPException(
+            status_code=503,
+            detail="Video storage requires SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, and SUPABASE_PUBLISHABLE_KEY.",
+        )
+    if not SUPABASE_URL.startswith("https://"):
+        raise HTTPException(status_code=503, detail="SUPABASE_URL must be an HTTPS Supabase project URL.")
+
+    with db() as connection:
+        movie = connection.execute("SELECT id FROM movies WHERE id = %s", (movie_id,)).fetchone()
+    if not movie:
+        raise HTTPException(status_code=404, detail="Save the movie metadata before uploading its video.")
+
+    safe_movie_id = re.sub(r"[^A-Za-z0-9_-]", "", movie_id)[:80] or "movie"
+    object_path = f"films/{safe_movie_id}/{uuid.uuid4().hex}{extension}"
+    bucket_segment = quote(SUPABASE_VIDEO_BUCKET, safe="")
+    object_segment = quote(object_path, safe="/")
+    sign_url = f"{SUPABASE_URL}/storage/v1/object/upload/sign/{bucket_segment}/{object_segment}"
+    headers = {
+        "apikey": SUPABASE_SERVICE_ROLE_KEY,
+        "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+        "Content-Type": "application/json",
+    }
+
+    try:
+        signed_response = requests.post(sign_url, headers=headers, json={"upsert": False}, timeout=(15, 30))
+    except requests.RequestException:
+        raise HTTPException(status_code=502, detail="Could not reach Supabase Storage to create a signed upload.")
+    if not signed_response.ok:
+        raise HTTPException(
+            status_code=502,
+            detail="Supabase could not create the upload token. Check the storage bucket, plan limit, and server-side key.",
+        )
+    try:
+        signed_data = signed_response.json()
+    except ValueError:
+        signed_data = {}
+    signed_token = signed_data.get("token")
+    if not signed_token and signed_data.get("url"):
+        signed_token = parse_qs(urlparse(str(signed_data["url"])).query).get("token", [None])[0]
+    if not signed_token:
+        raise HTTPException(status_code=502, detail="Supabase did not return a signed upload token.")
+
+    project_ref = urlparse(SUPABASE_URL).hostname.split(".")[0]
+    upload_endpoint = f"https://{project_ref}.storage.supabase.co/storage/v1/upload/resumable"
+    public_url = f"{SUPABASE_URL}/storage/v1/object/public/{bucket_segment}/{object_segment}"
+    record_log_text = f"Created signed video upload for movie {movie_id}"
+    with db() as connection:
+        record_log(connection, "VIDEO_UPLOAD_START", record_log_text, user["email"])
+
+    return {
+        "success": True,
+        "bucket": SUPABASE_VIDEO_BUCKET,
+        "path": object_path,
+        "signedToken": signed_token,
+        "uploadEndpoint": upload_endpoint,
+        "publicUrl": public_url,
+        "publishableKey": SUPABASE_PUBLISHABLE_KEY,
+        "sizeBytes": size_bytes,
+        "maxFileSizeBytes": MAX_VIDEO_UPLOAD_BYTES,
+        "chunkSizeBytes": 6 * 1024 * 1024,
+        "movieId": movie_id,
+        "field": field,
+    }
+
+
+@app.post("/api/admin/videos/complete-upload")
+async def complete_video_upload(request: Request) -> dict[str, Any]:
+    """Verify the stored object exists and immediately persist its URL to the movie row."""
+    user = admin_user(request)
+    body = await json_body(request)
+    movie_id = str(body.get("movieId", "")).strip()
+    object_path = str(body.get("path", "")).strip()
+    field = str(body.get("field", "fullMovieUrl"))
+    field_to_column = {"videoUrl": "video_url", "fullMovieUrl": "full_movie_url"}
+    if field not in field_to_column:
+        raise HTTPException(status_code=422, detail="field must be videoUrl or fullMovieUrl.")
+    if not movie_id or len(movie_id) > 128:
+        raise HTTPException(status_code=422, detail="A valid movieId is required.")
+
+    safe_movie_id = re.sub(r"[^A-Za-z0-9_-]", "", movie_id)[:80] or "movie"
+    allowed_prefix = f"films/{safe_movie_id}/"
+    if not object_path.startswith(allowed_prefix) or not re.fullmatch(r"films/[A-Za-z0-9_-]+/[a-f0-9]{32}\.(mp4|webm|mov|mkv)", object_path):
+        raise HTTPException(status_code=422, detail="Invalid video object path.")
+
+    bucket_segment = quote(SUPABASE_VIDEO_BUCKET, safe="")
+    object_segment = quote(object_path, safe="/")
+    info_url = f"{SUPABASE_URL}/storage/v1/object/info/{bucket_segment}/{object_segment}"
+    headers = {
+        "apikey": SUPABASE_SERVICE_ROLE_KEY,
+        "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+    }
+    try:
+        verify_response = requests.get(info_url, headers=headers, timeout=(10, 30))
+    except requests.RequestException:
+        raise HTTPException(status_code=502, detail="Could not verify the uploaded video in Supabase Storage.")
+    if not verify_response.ok:
+        raise HTTPException(status_code=409, detail="Video is not visible in Storage yet. Wait a moment and retry the save step.")
+
+    public_url = f"{SUPABASE_URL}/storage/v1/object/public/{bucket_segment}/{object_segment}"
+    with db() as connection:
+        movie = connection.execute("SELECT id FROM movies WHERE id = %s", (movie_id,)).fetchone()
+        if not movie:
+            raise HTTPException(status_code=404, detail="Movie not found.")
+        column = field_to_column[field]
+        connection.execute(f'UPDATE movies SET "{column}" = %s WHERE id = %s', (public_url, movie_id))
+        record_log(connection, "VIDEO_UPLOAD", f"Saved video to {object_path} and updated {field}", user["email"])
+    return {
+        "success": True,
+        "movieId": movie_id,
+        "field": field,
+        "path": object_path,
+        "url": public_url,
+        "movieUrlUpdated": True,
+    }
 
 
 @app.post("/api/admin/videos/upload")
