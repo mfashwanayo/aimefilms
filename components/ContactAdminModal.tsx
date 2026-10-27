@@ -14,37 +14,39 @@ interface ContactAdminModalProps {
 const ContactAdminModal: React.FC<ContactAdminModalProps> = ({ isOpen, onClose, user, language }) => {
   const [subject, setSubject] = useState('');
   const [message, setMessage] = useState('');
-  const [category, setCategory] = useState('Technical');
+  const [category, setCategory] = useState('Technical Support');
+  const [sendError, setSendError] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [sent, setSent] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSending) return;
     setIsSending(true);
-    
-    // Simulate registry transmission
-    const adminMessage = {
-      from: user?.email || 'Guest Node',
-      subject,
-      category,
-      message,
-      timestamp: new Date().toISOString()
-    };
-    
-    const currentInbox = JSON.parse(localStorage.getItem('aimefilms_admin_inbox') || '[]');
-    currentInbox.unshift(adminMessage);
-    localStorage.setItem('aimefilms_admin_inbox', JSON.stringify(currentInbox));
+    setSendError('');
 
-    setTimeout(() => {
-      setIsSending(false);
+    try {
+      const saved = await AimeFilmsAPI.submitFeedback({
+        name: user?.name || 'Website visitor',
+        email: user?.email || '',
+        category,
+        subject: subject.trim(),
+        body: message.trim(),
+      });
+      if (!saved) throw new Error('Feedback was not saved.');
+
       setSent(true);
-      setTimeout(() => {
+      window.setTimeout(() => {
         setSent(false);
         onClose();
         setSubject('');
         setMessage('');
-      }, 2000);
-    }, 1500);
+      }, 1800);
+    } catch {
+      setSendError('Your feedback could not be sent. Please check your connection and try again.');
+    } finally {
+      setIsSending(false);
+    }
   };
 
   if (!isOpen) return null;
@@ -69,7 +71,7 @@ const ContactAdminModal: React.FC<ContactAdminModalProps> = ({ isOpen, onClose, 
               <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="4"><path d="M20 6 9 17l-5-5"/></svg>
             </div>
             <p className="text-white font-black text-xl tracking-tight">Intelligence Transmitted.</p>
-            <p className="text-gray-500 text-xs mt-2 uppercase font-black tracking-widest">Master Admin hybert notified.</p>
+            <p className="text-gray-500 text-xs mt-2 uppercase font-black tracking-widest">Your feedback has been saved for the admin team.</p>
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="space-y-6">
@@ -120,6 +122,7 @@ const ContactAdminModal: React.FC<ContactAdminModalProps> = ({ isOpen, onClose, 
                 {isSending ? 'Transmitting...' : (language === 'RW' ? 'Ohereza Ubutumwa' : 'Dispatch Intelligence')}
               </button>
             </div>
+            {sendError && <p role="alert" className="text-sm font-bold text-red-400">{sendError}</p>}
           </form>
         )}
       </div>

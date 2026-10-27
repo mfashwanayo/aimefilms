@@ -14,23 +14,36 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
+from dotenv import load_dotenv
+import psycopg
+from psycopg.rows import dict_row
 from fastapi.middleware.cors import CORSMiddleware
 
 BASE_DIR = Path(__file__).resolve().parent
+load_dotenv(BASE_DIR / ".env")
+
+DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 DB_PATH = Path(os.getenv("DB_PATH", str(BASE_DIR.parent / "backend-data" / "aimefilms.sqlite")))
-ADMIN_NAME = os.getenv("ADMIN_NAME", "hybert")
-ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "hybertmfashwanayo@gmail.com").strip().lower()
-ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "%bert123{}@")
-TOKEN_SECRET = os.getenv("TOKEN_SECRET", "change-this-token-secret")
+ADMIN_NAME = os.getenv("ADMIN_NAME", "").strip()
+ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "").strip().lower()
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
+TOKEN_SECRET_CONFIGURED = bool(os.getenv("TOKEN_SECRET", "").strip())
+TOKEN_SECRET = os.getenv("TOKEN_SECRET", "").strip() or secrets.token_hex(32)
 TOKEN_TTL_SECONDS = 60 * 60 * 24 * 7
+MOVIE_ORDER = "ordinal DESC" if DATABASE_URL else "rowid DESC"
 
 app = FastAPI(title="AimeFilms API")
+FRONTEND_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv("FRONTEND_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(",")
+    if origin.strip()
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=FRONTEND_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 MOVIE_FIELDS = [
@@ -55,12 +68,46 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def db() -> sqlite3.Connection:
+class DBConnection:
+    """Small adapter allowing the same application queries to run on SQLite or PostgreSQL."""
+
+    def __init__(self, connection: Any, postgres: bool = False):
+        self.connection = connection
+        self.postgres = postgres
+
+    def execute(self, sql: str, params: tuple[Any, ...] | list[Any] = ()):
+        if self.postgres:
+            ignore_conflicts = sql.lstrip().upper().startswith("INSERT OR IGNORE INTO")
+            if ignore_conflicts:
+                sql = sql.replace("INSERT OR IGNORE INTO", "INSERT INTO", 1).rstrip().rstrip(";")
+            sql = sql.replace("?", "%s")
+            if ignore_conflicts:
+                sql += " ON CONFLICT DO NOTHING"
+        return self.connection.execute(sql, params)
+
+    def executescript(self, script: str) -> None:
+        if not self.postgres:
+            self.connection.executescript(script)
+            return
+        for statement in script.split(";"):
+            statement = statement.strip()
+            if statement:
+                self.execute(statement)
+
+    def __getattr__(self, name: str):
+        return getattr(self.connection, name)
+
+
+def db() -> DBConnection:
+    if DATABASE_URL:
+        connection = psycopg.connect(DATABASE_URL, row_factory=dict_row)
+        return DBConnection(connection, postgres=True)
+
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(DB_PATH)
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA foreign_keys = ON")
-    return connection
+    return DBConnection(connection)
 
 
 def hash_password(password: str) -> str:
@@ -81,37 +128,90 @@ def verify_password(password: str, stored: str) -> bool:
 
 
 def init_db() -> None:
-    connection = db()
-    connection.executescript(
-        """
-        CREATE TABLE IF NOT EXISTS users (
-            email TEXT PRIMARY KEY, name TEXT NOT NULL, password_hash TEXT NOT NULL,
-            avatar TEXT, role TEXT NOT NULL DEFAULT 'user', is_verified INTEGER NOT NULL DEFAULT 1,
-            can_download INTEGER NOT NULL DEFAULT 1, language TEXT NOT NULL DEFAULT 'EN',
-            is_blocked INTEGER NOT NULL DEFAULT 0, joined_at TEXT NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS movies (
-            id TEXT PRIMARY KEY, name TEXT NOT NULL, brand TEXT NOT NULL DEFAULT 'aimefilms',
-            category TEXT NOT NULL DEFAULT 'General Entertainment', section TEXT NOT NULL DEFAULT 'english',
-            is_hidden INTEGER NOT NULL DEFAULT 0, description TEXT NOT NULL DEFAULT '',
-            highlights TEXT NOT NULL DEFAULT '[]', pros TEXT NOT NULL DEFAULT '[]', image_url TEXT NOT NULL DEFAULT '',
-            logo_url TEXT NOT NULL DEFAULT '', link TEXT NOT NULL DEFAULT '', video_url TEXT NOT NULL DEFAULT '',
-            full_movie_url TEXT NOT NULL DEFAULT '', rating TEXT NOT NULL DEFAULT '0', year TEXT NOT NULL DEFAULT '',
-            duration TEXT NOT NULL DEFAULT '', cast TEXT NOT NULL DEFAULT '[]', synopsis TEXT NOT NULL DEFAULT '',
-            is_trending INTEGER NOT NULL DEFAULT 0, is_new INTEGER NOT NULL DEFAULT 0,
-            genre TEXT NOT NULL DEFAULT '[]', match_score REAL NOT NULL DEFAULT 0, price TEXT
-        );
-        CREATE TABLE IF NOT EXISTS views (movie_id TEXT PRIMARY KEY, view_count INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL);
-        CREATE TABLE IF NOT EXISTS logs (id TEXT PRIMARY KEY, type TEXT NOT NULL, details TEXT NOT NULL, user_email TEXT, timestamp TEXT NOT NULL);
-        CREATE TABLE IF NOT EXISTS messages (id TEXT PRIMARY KEY, to_email TEXT NOT NULL, from_name TEXT NOT NULL, subject TEXT NOT NULL, body TEXT NOT NULL, timestamp TEXT NOT NULL, is_read INTEGER NOT NULL DEFAULT 0);
-        CREATE TABLE IF NOT EXISTS user_lists (email TEXT NOT NULL, list_type TEXT NOT NULL, movie_id TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY (email, list_type, movie_id));
-        """
-    )
-    if not connection.execute("SELECT email FROM users WHERE email = ?", (ADMIN_EMAIL,)).fetchone():
-        connection.execute(
-            "INSERT INTO users (email, name, password_hash, role, is_verified, can_download, joined_at) VALUES (?, ?, ?, 'admin', 1, 1, ?)",
-            (ADMIN_EMAIL, ADMIN_NAME, hash_password(ADMIN_PASSWORD), utc_now()),
+    if DATABASE_URL and not (ADMIN_NAME and ADMIN_EMAIL and ADMIN_PASSWORD and TOKEN_SECRET_CONFIGURED):
+        raise RuntimeError(
+            "For a Supabase deployment, set ADMIN_NAME, ADMIN_EMAIL, ADMIN_PASSWORD, and TOKEN_SECRET."
         )
+
+    connection = db()
+    if DATABASE_URL:
+        connection.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS public.users (
+                email TEXT PRIMARY KEY, name TEXT NOT NULL, password_hash TEXT NOT NULL,
+                avatar TEXT, role TEXT NOT NULL DEFAULT 'user', is_verified SMALLINT NOT NULL DEFAULT 1,
+                can_download SMALLINT NOT NULL DEFAULT 1, language TEXT NOT NULL DEFAULT 'EN',
+                is_blocked SMALLINT NOT NULL DEFAULT 0, joined_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS public.movies (
+                id TEXT PRIMARY KEY, ordinal BIGSERIAL UNIQUE, name TEXT NOT NULL,
+                brand TEXT NOT NULL DEFAULT 'aimefilms', category TEXT NOT NULL DEFAULT 'General Entertainment',
+                section TEXT NOT NULL DEFAULT 'english', is_hidden SMALLINT NOT NULL DEFAULT 0,
+                description TEXT NOT NULL DEFAULT '', highlights TEXT NOT NULL DEFAULT '[]',
+                pros TEXT NOT NULL DEFAULT '[]', image_url TEXT NOT NULL DEFAULT '', logo_url TEXT NOT NULL DEFAULT '',
+                link TEXT NOT NULL DEFAULT '', video_url TEXT NOT NULL DEFAULT '', full_movie_url TEXT NOT NULL DEFAULT '',
+                rating TEXT NOT NULL DEFAULT '0', year TEXT NOT NULL DEFAULT '', duration TEXT NOT NULL DEFAULT '',
+                "cast" TEXT NOT NULL DEFAULT '[]', synopsis TEXT NOT NULL DEFAULT '',
+                is_trending SMALLINT NOT NULL DEFAULT 0, is_new SMALLINT NOT NULL DEFAULT 0,
+                genre TEXT NOT NULL DEFAULT '[]', match_score DOUBLE PRECISION NOT NULL DEFAULT 0, price TEXT
+            );
+            CREATE INDEX IF NOT EXISTS movies_ordinal_idx ON public.movies (ordinal DESC);
+            CREATE TABLE IF NOT EXISTS public.views (
+                movie_id TEXT PRIMARY KEY, view_count BIGINT NOT NULL DEFAULT 0, updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS public.logs (
+                id TEXT PRIMARY KEY, type TEXT NOT NULL, details TEXT NOT NULL, user_email TEXT, timestamp TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS public.messages (
+                id TEXT PRIMARY KEY, to_email TEXT NOT NULL, from_name TEXT NOT NULL, subject TEXT NOT NULL,
+                body TEXT NOT NULL, timestamp TEXT NOT NULL, is_read SMALLINT NOT NULL DEFAULT 0
+            );
+            CREATE TABLE IF NOT EXISTS public.user_lists (
+                email TEXT NOT NULL, list_type TEXT NOT NULL, movie_id TEXT NOT NULL, created_at TEXT NOT NULL,
+                PRIMARY KEY (email, list_type, movie_id)
+            );
+            ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
+            ALTER TABLE public.movies ENABLE ROW LEVEL SECURITY;
+            ALTER TABLE public.views ENABLE ROW LEVEL SECURITY;
+            ALTER TABLE public.logs ENABLE ROW LEVEL SECURITY;
+            ALTER TABLE public.messages ENABLE ROW LEVEL SECURITY;
+            ALTER TABLE public.user_lists ENABLE ROW LEVEL SECURITY;
+            """
+        )
+    else:
+        connection.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS users (
+                email TEXT PRIMARY KEY, name TEXT NOT NULL, password_hash TEXT NOT NULL,
+                avatar TEXT, role TEXT NOT NULL DEFAULT 'user', is_verified INTEGER NOT NULL DEFAULT 1,
+                can_download INTEGER NOT NULL DEFAULT 1, language TEXT NOT NULL DEFAULT 'EN',
+                is_blocked INTEGER NOT NULL DEFAULT 0, joined_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS movies (
+                id TEXT PRIMARY KEY, name TEXT NOT NULL, brand TEXT NOT NULL DEFAULT 'aimefilms',
+                category TEXT NOT NULL DEFAULT 'General Entertainment', section TEXT NOT NULL DEFAULT 'english',
+                is_hidden INTEGER NOT NULL DEFAULT 0, description TEXT NOT NULL DEFAULT '',
+                highlights TEXT NOT NULL DEFAULT '[]', pros TEXT NOT NULL DEFAULT '[]', image_url TEXT NOT NULL DEFAULT '',
+                logo_url TEXT NOT NULL DEFAULT '', link TEXT NOT NULL DEFAULT '', video_url TEXT NOT NULL DEFAULT '',
+                full_movie_url TEXT NOT NULL DEFAULT '', rating TEXT NOT NULL DEFAULT '0', year TEXT NOT NULL DEFAULT '',
+                duration TEXT NOT NULL DEFAULT '', cast TEXT NOT NULL DEFAULT '[]', synopsis TEXT NOT NULL DEFAULT '',
+                is_trending INTEGER NOT NULL DEFAULT 0, is_new INTEGER NOT NULL DEFAULT 0,
+                genre TEXT NOT NULL DEFAULT '[]', match_score REAL NOT NULL DEFAULT 0, price TEXT
+            );
+            CREATE TABLE IF NOT EXISTS views (movie_id TEXT PRIMARY KEY, view_count INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS logs (id TEXT PRIMARY KEY, type TEXT NOT NULL, details TEXT NOT NULL, user_email TEXT, timestamp TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS messages (id TEXT PRIMARY KEY, to_email TEXT NOT NULL, from_name TEXT NOT NULL, subject TEXT NOT NULL, body TEXT NOT NULL, timestamp TEXT NOT NULL, is_read INTEGER NOT NULL DEFAULT 0);
+            CREATE TABLE IF NOT EXISTS user_lists (email TEXT NOT NULL, list_type TEXT NOT NULL, movie_id TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY (email, list_type, movie_id));
+            """
+        )
+
+    if ADMIN_EMAIL and ADMIN_PASSWORD:
+        existing_admin = connection.execute("SELECT email FROM users WHERE email = ?", (ADMIN_EMAIL,)).fetchone()
+        if not existing_admin:
+            connection.execute(
+                "INSERT INTO users (email, name, password_hash, role, is_verified, can_download, joined_at) VALUES (?, ?, ?, 'admin', 1, 1, ?)",
+                (ADMIN_EMAIL, ADMIN_NAME or ADMIN_EMAIL.split("@")[0], hash_password(ADMIN_PASSWORD), utc_now()),
+            )
     connection.commit()
     connection.close()
 
@@ -203,7 +303,7 @@ def movie_values(movie: dict[str, Any]) -> tuple[Any, ...]:
 
 
 def insert_movie(connection: sqlite3.Connection, movie: dict[str, Any]) -> None:
-    columns = ",".join(MOVIE_FIELDS)
+    columns = ",".join(f'"{field}"' if field == "cast" else field for field in MOVIE_FIELDS)
     placeholders = ",".join("?" for _ in MOVIE_FIELDS)
     connection.execute(f"INSERT OR IGNORE INTO movies ({columns}) VALUES ({placeholders})", movie_values(movie))
 
@@ -234,7 +334,7 @@ def health() -> dict[str, bool]:
 @app.get("/api/movies")
 def get_movies() -> dict[str, Any]:
     connection = db()
-    rows = connection.execute("SELECT * FROM movies WHERE is_hidden = 0 ORDER BY rowid DESC").fetchall()
+    rows = connection.execute(f"SELECT * FROM movies WHERE is_hidden = 0 ORDER BY {MOVIE_ORDER}").fetchall()
     connection.close()
     return {"success": True, "movies": [movie_from_row(row) for row in rows]}
 
@@ -244,7 +344,7 @@ def search_movies(q: str = "") -> dict[str, Any]:
     query = f"%{q.strip().lower()}%"
     connection = db()
     rows = connection.execute(
-        "SELECT * FROM movies WHERE is_hidden = 0 AND (lower(name) LIKE ? OR lower(description) LIKE ? OR lower(synopsis) LIKE ? OR lower(genre) LIKE ?) ORDER BY rowid DESC",
+        f"SELECT * FROM movies WHERE is_hidden = 0 AND (lower(name) LIKE ? OR lower(description) LIKE ? OR lower(synopsis) LIKE ? OR lower(genre) LIKE ?) ORDER BY {MOVIE_ORDER}",
         (query, query, query, query),
     ).fetchall()
     connection.close()
@@ -417,7 +517,7 @@ async def update_movie(movie_id: str, request: Request) -> dict[str, Any]:
     current.update(await json_body(request))
     movie = normalize_movie(current, movie_id)
     fields = [field for field in MOVIE_FIELDS if field != "id"]
-    assignments = ",".join(f"{field} = ?" for field in fields)
+    assignments = ",".join(f'"{field}" = ?' if field == "cast" else f"{field} = ?" for field in fields)
     values = movie_values(movie)
     connection.execute(f"UPDATE movies SET {assignments} WHERE id = ?", tuple(values[MOVIE_FIELDS.index(field)] for field in fields) + (movie_id,))
     connection.commit()
@@ -445,6 +545,41 @@ def admin_messages(request: Request) -> dict[str, Any]:
     rows = connection.execute("SELECT id, to_email AS toEmail, from_name AS fromName, subject, body, timestamp, is_read AS isRead FROM messages ORDER BY timestamp DESC").fetchall()
     connection.close()
     return {"success": True, "messages": [dict(row) for row in rows]}
+
+
+
+@app.post("/api/feedback")
+async def submit_feedback(request: Request) -> dict[str, Any]:
+    body = await json_body(request)
+    name = str(body.get("name", "Website visitor")).strip()[:100] or "Website visitor"
+    email = str(body.get("email", "")).strip().lower()[:254]
+    category = str(body.get("category", "Other")).strip()
+    subject = str(body.get("subject", "")).strip()
+    message = str(body.get("body", body.get("message", ""))).strip()
+
+    allowed_categories = {"Technical Support", "Content Request", "Account Issue", "Other Intelligence"}
+    if category not in allowed_categories:
+        category = "Other Intelligence"
+    if email and ("@" not in email or email.startswith("@") or email.endswith("@")):
+        raise HTTPException(status_code=422, detail="Enter a valid email address.")
+    if not subject or len(subject) > 180:
+        raise HTTPException(status_code=422, detail="Subject is required and must be at most 180 characters.")
+    if len(message) < 5 or len(message) > 5000:
+        raise HTTPException(status_code=422, detail="Message must be between 5 and 5000 characters.")
+
+    message_id = uuid.uuid4().hex
+    from_name = f"{name} <{email}>" if email else name
+    feedback_subject = f"[Feedback: {category}] {subject}"[:240]
+    recipient = ADMIN_EMAIL or "admin@aimefilms.local"
+    connection = db()
+    connection.execute(
+        "INSERT INTO messages (id, to_email, from_name, subject, body, timestamp, is_read) VALUES (?, ?, ?, ?, ?, ?, 0)",
+        (message_id, recipient, from_name, feedback_subject, message, utc_now()),
+    )
+    record_log(connection, "FEEDBACK", f"Website feedback received: {subject}", email or None)
+    connection.commit()
+    connection.close()
+    return {"success": True, "id": message_id, "message": "Feedback delivered to the admin inbox."}
 
 
 @app.post("/api/messages")
@@ -541,4 +676,3 @@ async def update_profile(request: Request) -> dict[str, Any]:
     return {"success": True}
 
 
-init_db()

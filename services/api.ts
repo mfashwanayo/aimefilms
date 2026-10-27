@@ -3,14 +3,7 @@ import { StreamingService, User, UserPost, UserMessage, LogEntry } from '../type
 import { backendLogin, backendRegister, backendGetMovies, backendSearchMovies, backendTrackView } from './backendApi';
 import { apiFetch, getAuthToken, setAuthToken } from './http';
 
-// Compatibility layer: calls the Python REST API via backendApi.ts when possible,
-// falls back to localStorage when the backend is unreachable.
-
-export const MASTER_ADMIN_CREDENTIALS = {
-  name: 'hybert',
-  email: 'hybertmfashwanayo@gmail.com',
-  password: '%bert123{}@'
-};
+// The backend is the source of truth for authentication and shared user messages.
 
 const DB_KEY = 'aimefilms_db_v4';
 const USERS_KEY = 'aimefilms_users_v3';
@@ -143,6 +136,14 @@ export class AimeFilmsAPI {
   }
 
   // --- MESSAGES ---
+  static async submitFeedback(input: { name: string; email?: string; category: string; subject: string; body: string }): Promise<boolean> {
+    const result = await apiFetch<{ success?: boolean }>('/api/feedback', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+    return result?.success === true;
+  }
+
   static async sendUserMessage(toEmail: string, fromName: string, subject: string, body: string): Promise<boolean> {
     try {
       if (getAuthToken()) {
@@ -353,38 +354,20 @@ export class AimeFilmsAPI {
       const res = await backendLogin(identifier, password);
       if (res.success && res.user) return { success: true, user: res.user };
       return { success: false, message: res.message || 'Identity check failed.' };
-    } catch { /* fallback */ }
-
-    await delay(API_LATENCY);
-    const idLower = identifier.trim().toLowerCase();
-    if ((idLower === MASTER_ADMIN_CREDENTIALS.email.toLowerCase() || idLower === MASTER_ADMIN_CREDENTIALS.name.toLowerCase()) && password === MASTER_ADMIN_CREDENTIALS.password) {
-      const adminUser: User = { name: MASTER_ADMIN_CREDENTIALS.name, email: MASTER_ADMIN_CREDENTIALS.email, role: 'admin', isVerified: true, joinedAt: '2024-01-01T' };
-      await this.addLog('LOGIN', 'Admin logged in', adminUser.email);
-      return { success: true, user: adminUser };
+    } catch {
+      return { success: false, message: 'Authentication service is unavailable. Please try again.' };
     }
-    const users = this.getUsers();
-    const user = users.find(u => u.email.toLowerCase() === idLower || u.name.toLowerCase() === idLower);
-    if (!user || user.password !== password) return { success: false, message: 'Identity check failed.' };
-    const { password: _, ...sanitized } = user;
-    await this.addLog('LOGIN', 'User logged in', sanitized.email);
-    return { success: true, user: sanitized as User };
   }
 
   static async registerUser(userData: Partial<User & { password?: string }>): Promise<{ success: boolean; message: string }> {
-    try {
-      if (userData.email && userData.password) {
-        return await backendRegister(userData.name || '', userData.email, userData.password);
-      }
-    } catch { /* fallback */ }
-
-    const users = this.getUsers();
-    if (users.some(u => u.email.toLowerCase() === userData.email?.toLowerCase())) {
-      return { success: false, message: 'Email is already in the registry.' };
+    if (!userData.email || !userData.password) {
+      return { success: false, message: 'Name, email, and password are required.' };
     }
-    const newUser = { ...userData, role: 'user' as const, isVerified: true, isBlocked: false, joinedAt: new Date().toISOString() };
-    this.saveUsers([...users, newUser]);
-    await this.addLog('REGISTER', `New user registered: ${newUser.email}`, newUser.email);
-    return { success: true, message: 'Success.' };
+    try {
+      return await backendRegister(userData.name || '', userData.email, userData.password);
+    } catch {
+      return { success: false, message: 'Registration service is unavailable. Please try again.' };
+    }
   }
 
   private static getUsers(): (User & { password?: string })[] {
