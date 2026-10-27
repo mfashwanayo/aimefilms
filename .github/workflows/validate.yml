@@ -47,7 +47,8 @@ jobs:
           paths = {route.path for route in app.routes}
           required = {
               "/health",
-              "/api/feedback",
+              "/api/admin/videos/create-upload",
+              "/api/admin/videos/complete-upload",
               "/api/admin/messages",
               "/api/auth/login",
               "/api/movies",
