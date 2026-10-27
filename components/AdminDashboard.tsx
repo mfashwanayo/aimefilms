@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { AimeFilmsAPI } from '../services/api';
+import { backendAdminAddMovie, backendUploadVideo } from '../services/backendApi';
 import { StreamingService, User, LogEntry, UserMessage, Brand } from '../types';
 import Logo from './Logo';
 
@@ -19,6 +20,12 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
   const [messages, setMessages] = useState<UserMessage[]>([]);
   const [stats, setStats] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [selectedVideoFiles, setSelectedVideoFiles] = useState<Partial<Record<'videoUrl' | 'fullMovieUrl', File>>>({});
+  const [videoProgress, setVideoProgress] = useState<Partial<Record<'videoUrl' | 'fullMovieUrl', number>>>({});
+  const [uploadStatus, setUploadStatus] = useState('');
+  const [isSavingMovie, setIsSavingMovie] = useState(false);
+  const [pendingVideoMovieId, setPendingVideoMovieId] = useState<string | null>(null);
+  const [uploadedVideoFields, setUploadedVideoFields] = useState<string[]>([]);
   
   const brandColors = {
     aimefilms: { bg: 'bg-red-600', shadow: 'shadow-red-600/20', text: 'text-red-600' },
@@ -68,10 +75,60 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
 
   const handleAddMovie = async (e: React.FormEvent) => {
     e.preventDefault();
-    await AimeFilmsAPI.addMovie(newMovie as any);
-    setIsAddingMovie(false);
-    loadData();
-    onRefresh();
+    setIsSavingMovie(true);
+    setUploadStatus('');
+    try {
+      const videoEntries = (Object.entries(selectedVideoFiles) as Array<['videoUrl' | 'fullMovieUrl', File]>)
+        .filter(([, file]) => Boolean(file));
+
+      if (videoEntries.length === 0) {
+        await AimeFilmsAPI.addMovie(newMovie as any);
+      } else {
+        // Persist the movie row first; the following direct resumable uploads
+        // then update its URL as soon as each video finishes uploading.
+        let movieId = pendingVideoMovieId;
+        if (!movieId) {
+          const metadata: Partial<StreamingService> = {
+            ...newMovie,
+            ...(selectedVideoFiles.videoUrl ? { videoUrl: '' } : {}),
+            ...(selectedVideoFiles.fullMovieUrl ? { fullMovieUrl: '' } : {}),
+          };
+          const created = await backendAdminAddMovie(metadata);
+          if (!created?.success || !created.movie?.id) {
+            throw new Error('The movie could not be saved to the database. Check the FastAPI connection and sign in again.');
+          }
+          movieId = created.movie.id;
+          setPendingVideoMovieId(movieId);
+        }
+
+        const completed = new Set(uploadedVideoFields);
+        for (const [field, file] of videoEntries) {
+          if (completed.has(field)) continue;
+          setUploadStatus(`Uploading ${file.name} to Supabase Storage…`);
+          setVideoProgress(prev => ({ ...prev, [field]: 0 }));
+          await backendUploadVideo(file, movieId, field, percent => {
+            setVideoProgress(prev => ({ ...prev, [field]: percent }));
+          });
+          completed.add(field);
+          setUploadedVideoFields(Array.from(completed));
+          setUploadStatus(`Saved ${field === 'fullMovieUrl' ? 'full movie' : 'trailer'} to Storage and database.`);
+        }
+      }
+
+      setUploadStatus('Movie saved successfully.');
+      setIsAddingMovie(false);
+      setSelectedVideoFiles({});
+      setVideoProgress({});
+      setPendingVideoMovieId(null);
+      setUploadedVideoFields([]);
+      loadData();
+      onRefresh();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Movie upload failed.';
+      setUploadStatus(message);
+    } finally {
+      setIsSavingMovie(false);
+    }
   };
 
   const handleDeleteMovie = async (id: string) => {
@@ -82,7 +139,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
     }
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>, field: 'imageUrl' | 'videoUrl' | 'fullMovieUrl') => {
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>, field: 'imageUrl') => {
     const file = e.target.files?.[0];
     if (file) {
       const reader = new FileReader();
@@ -91,6 +148,37 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
       };
       reader.readAsDataURL(file);
     }
+  };
+
+  const handleVideoFileChange = (
+    e: React.ChangeEvent<HTMLInputElement>,
+    field: 'videoUrl' | 'fullMovieUrl'
+  ) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const allowedExtensions = /\\.(mp4|webm|mov|mkv)$/i;
+    if (!allowedExtensions.test(file.name)) {
+      setUploadStatus('Choose an MP4, WebM, MOV, or MKV video.');
+      e.target.value = '';
+      return;
+    }
+    if (file.size > 3_900_000_000) {
+      setUploadStatus('This video is larger than the app limit of 3.9 GB.');
+      e.target.value = '';
+      return;
+    }
+    setSelectedVideoFiles(prev => ({ ...prev, [field]: file }));
+    setNewMovie(prev => ({ ...prev, [field]: '' }));
+    setUploadedVideoFields(prev => prev.filter(uploadedField => uploadedField !== field));
+    setVideoProgress(prev => ({ ...prev, [field]: 0 }));
+    setUploadStatus('');
+    e.target.value = '';
+  };
+
+  const formatFileSize = (bytes: number): string => {
+    if (bytes >= 1024 ** 3) return `${(bytes / (1024 ** 3)).toFixed(2)} GB`;
+    if (bytes >= 1024 ** 2) return `${(bytes / (1024 ** 2)).toFixed(1)} MB`;
+    return `${(bytes / 1024).toFixed(0)} KB`;
   };
 
   if (!isOpen) return null;
