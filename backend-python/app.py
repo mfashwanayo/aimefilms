@@ -12,11 +12,13 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 from dotenv import load_dotenv
 import psycopg
+import requests
 from psycopg.rows import dict_row
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -32,11 +34,47 @@ ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
 TOKEN_SECRET = os.getenv("TOKEN_SECRET", "")
 TOKEN_TTL_SECONDS = 60 * 60 * 24 * 7
 
+# Video uploads use Supabase Storage. Keep this key private and server-side.
+SUPABASE_URL = os.getenv("SUPABASE_URL", "").strip().rstrip("/")
+SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
+SUPABASE_VIDEO_BUCKET = os.getenv("SUPABASE_VIDEO_BUCKET", "aimefilms-videos").strip()
+try:
+    MAX_VIDEO_UPLOAD_MB = max(1, int(os.getenv("MAX_VIDEO_UPLOAD_MB", "50")))
+except ValueError:
+    MAX_VIDEO_UPLOAD_MB = 50
+MAX_VIDEO_UPLOAD_BYTES = MAX_VIDEO_UPLOAD_MB * 1024 * 1024
+VIDEO_MIME_BY_EXTENSION = {
+    ".mp4": "video/mp4",
+    ".webm": "video/webm",
+    ".mov": "video/quicktime",
+    ".mkv": "video/x-matroska",
+}
+
 FRONTEND_ORIGINS = [
     origin.strip().rstrip("/")
     for origin in os.getenv("FRONTEND_ORIGINS", "http://localhost:5173").split(",")
     if origin.strip()
 ]
+
+@app.middleware("http")
+async def reject_oversized_video_uploads(request: Request, call_next):
+    """Reject oversized uploads early when Content-Length is supplied."""
+    if request.url.path == "/api/admin/videos/upload":
+        declared = request.headers.get("content-length")
+        if declared:
+            try:
+                if int(declared) > MAX_VIDEO_UPLOAD_BYTES + (1024 * 1024):
+                    return JSONResponse(
+                        status_code=413,
+                        content={
+                            "success": False,
+                            "message": f"Video upload exceeds the configured {MAX_VIDEO_UPLOAD_MB} MB limit.",
+                        },
+                    )
+            except ValueError:
+                return JSONResponse(status_code=400, content={"success": False, "message": "Invalid Content-Length."})
+    return await call_next(request)
+
 
 app = FastAPI(
     title="AimeFilms API",
@@ -521,6 +559,124 @@ def clear_logs(request: Request) -> dict[str, Any]:
     with db() as connection:
         connection.execute("DELETE FROM logs")
     return {"success": True}
+
+
+@app.post("/api/admin/videos/upload")
+def upload_video(
+    request: Request,
+    file: UploadFile = File(..., description="MP4, WebM, MOV, or MKV video file"),
+    movie_id: str | None = Form(default=None, description="Optional existing movie ID to update"),
+    field: str = Form(default="fullMovieUrl", description="Either fullMovieUrl or videoUrl"),
+) -> dict[str, Any]:
+    """Upload a video to Supabase Storage. Only authenticated admins may upload."""
+    user = admin_user(request)
+
+    if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+        raise HTTPException(
+            status_code=503,
+            detail="Video storage is not configured. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY on the backend.",
+        )
+    if not SUPABASE_URL.startswith("https://"):
+        raise HTTPException(status_code=503, detail="SUPABASE_URL must be an HTTPS Supabase project URL.")
+
+    field_to_column = {"videoUrl": "video_url", "fullMovieUrl": "full_movie_url"}
+    if field not in field_to_column:
+        raise HTTPException(status_code=422, detail="field must be videoUrl or fullMovieUrl.")
+
+    if movie_id:
+        movie_id = movie_id.strip()
+        if not movie_id or len(movie_id) > 128:
+            raise HTTPException(status_code=422, detail="movie_id must be between 1 and 128 characters.")
+        with db() as connection:
+            exists = connection.execute("SELECT id FROM movies WHERE id = %s", (movie_id,)).fetchone()
+        if not exists:
+            raise HTTPException(status_code=404, detail="Movie not found. Create the movie first or omit movie_id to upload a standalone video.")
+
+    original_name = Path(file.filename or "").name
+    extension = Path(original_name).suffix.lower()
+    expected_content_type = VIDEO_MIME_BY_EXTENSION.get(extension)
+    if not expected_content_type:
+        raise HTTPException(status_code=415, detail="Unsupported video type. Upload an MP4, WebM, MOV, or MKV file.")
+
+    declared_content_type = (file.content_type or "").split(";", 1)[0].strip().lower()
+    if declared_content_type and declared_content_type not in (expected_content_type, "application/octet-stream"):
+        raise HTTPException(status_code=415, detail="The file content type does not match its video extension.")
+
+    try:
+        file.file.seek(0, os.SEEK_END)
+        file_size = file.file.tell()
+        file.file.seek(0)
+    except (OSError, ValueError):
+        raise HTTPException(status_code=400, detail="Unable to read the uploaded video.")
+    if file_size <= 0:
+        raise HTTPException(status_code=422, detail="The uploaded video is empty.")
+    if file_size > MAX_VIDEO_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Video is too large. The configured limit is {MAX_VIDEO_UPLOAD_MB} MB.",
+        )
+
+    # Use a generated path rather than trusting a user-supplied filename.
+    folder = re.sub(r"[^A-Za-z0-9_-]", "", movie_id or "")[:80] or "unassigned"
+    object_path = f"{folder}/{uuid.uuid4().hex}{extension}"
+    bucket_segment = quote(SUPABASE_VIDEO_BUCKET, safe="")
+    object_segment = quote(object_path, safe="/")
+    upload_url = f"{SUPABASE_URL}/storage/v1/object/{bucket_segment}/{object_segment}"
+    headers = {
+        "apikey": SUPABASE_SERVICE_ROLE_KEY,
+        "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+        "Content-Type": expected_content_type,
+        "Cache-Control": "3600",
+        "x-upsert": "false",
+    }
+
+    try:
+        file.file.seek(0)
+        storage_response = requests.post(
+            upload_url,
+            data=file.file,
+            headers=headers,
+            timeout=(15, 300),
+        )
+    except requests.RequestException:
+        raise HTTPException(status_code=502, detail="Could not reach Supabase Storage. Check the backend storage settings and try again.")
+
+    if not storage_response.ok:
+        if storage_response.status_code == 413:
+            raise HTTPException(status_code=413, detail="Supabase Storage rejected the video because it exceeds the project's upload limit.")
+        if storage_response.status_code == 409:
+            raise HTTPException(status_code=409, detail="A video already exists at this storage path. Please retry the upload.")
+        raise HTTPException(
+            status_code=502,
+            detail="Supabase Storage rejected the video. Check the storage bucket and server-side key configuration.",
+        )
+
+    public_url = f"{SUPABASE_URL}/storage/v1/object/public/{bucket_segment}/{object_segment}"
+    response: dict[str, Any] = {
+        "success": True,
+        "bucket": SUPABASE_VIDEO_BUCKET,
+        "path": object_path,
+        "url": public_url,
+        "sizeBytes": file_size,
+        "contentType": expected_content_type,
+    }
+
+    if movie_id:
+        target_column = field_to_column[field]
+        with db() as connection:
+            connection.execute(
+                f'UPDATE movies SET "{target_column}" = %s WHERE id = %s',
+                (public_url, movie_id),
+            )
+            record_log(connection, "VIDEO_UPLOAD", f"Uploaded video to {field} for movie {movie_id}", user["email"])
+        response["movieId"] = movie_id
+        response["field"] = field
+        response["movieUrlUpdated"] = True
+    else:
+        response["movieUrlUpdated"] = False
+        response["message"] = "Video uploaded. Save the returned URL in the movie's videoUrl or fullMovieUrl field."
+
+    return response
 
 
 @app.post("/api/admin/movies")
