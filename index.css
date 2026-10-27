@@ -40,3 +40,74 @@
 .brand-aimefilms ::-webkit-scrollbar-thumb:hover { background: #ef4444; }
 .brand-filmsnyarwanda ::-webkit-scrollbar-thumb:hover { background: #eab308; }
 .brand-princefilms ::-webkit-scrollbar-thumb:hover { background: #a855f7; }
+
+
+/* Brand personalities: each network has a distinct visual language. */
+.brand-aimefilms {
+  --brand-primary: #ef4444;
+  --brand-glow: rgba(239, 68, 68, 0.18);
+}
+.brand-filmsnyarwanda {
+  --brand-primary: #eab308;
+  --brand-glow: rgba(234, 179, 8, 0.18);
+}
+.brand-princefilms {
+  --brand-primary: #a78bfa;
+  --brand-glow: rgba(139, 92, 246, 0.22);
+  background-color: #07050c !important;
+  background-image: radial-gradient(ellipse at 78% 0%, rgba(109, 40, 217, 0.14), transparent 42%);
+}
+.brand-princefilms .bg-red-600 { background-color: #7c3aed !important; }
+.brand-princefilms .text-red-600,
+.brand-princefilms .text-red-500 { color: #a78bfa !important; }
+.brand-princefilms .border-red-600 { border-color: #8b5cf6 !important; }
+.brand-princefilms .hover\\:bg-red-700:hover { background-color: #6d28d9 !important; }
+.brand-princefilms .hover\\:text-red-600:hover,
+.brand-princefilms .hover\\:text-red-500:hover { color: #c4b5fd !important; }
+.brand-princefilms .border-red-600\\/20 { border-color: rgb(139 92 246 / 0.2) !important; }
+.brand-princefilms .bg-red-600\\/10 { background-color: rgb(139 92 246 / 0.1) !important; }
+.brand-princefilms .princefilms-sidebar { background: linear-gradient(180deg, #100b1b 0%, #09070d 70%); }
+.brand-princefilms .princefilms-nav-link {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  width: 100%;
+  border: 1px solid transparent;
+  border-radius: 0.85rem;
+  padding: 0.72rem 0.85rem;
+  color: #a5a0b5;
+  font-size: 0.82rem;
+  font-weight: 650;
+  text-align: left;
+  transition: background 180ms ease, color 180ms ease, border-color 180ms ease, transform 180ms ease;
+}
+.brand-princefilms .princefilms-nav-link:hover {
+  color: #fff;
+  background: rgba(139, 92, 246, 0.14);
+  border-color: rgba(167, 139, 250, 0.2);
+  transform: translateX(2px);
+}
+.brand-princefilms .princefilms-nav-icon {
+  width: 1.7rem;
+  height: 1.7rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.55rem;
+  background: rgba(139, 92, 246, 0.12);
+  color: #c4b5fd;
+  font-size: 0.92rem;
+}
+.brand-princefilms .princefilms-row h3 { font-size: clamp(1.1rem, 2vw, 1.55rem); font-weight: 750; }
+.brand-princefilms .princefilms-card h4 { font-size: 0.9rem; }
+.brand-princefilms .princefilms-card p { font-size: 0.72rem; line-height: 1.4; }
+.brand-princefilms .princefilms-top10 .stroke-text { color: #c4b5fd; }
+.brand-princefilms .princefilms-top10 .bg-gradient-to-r { --tw-gradient-from: #8b5cf6 var(--tw-gradient-from-position); }
+.brand-filmsnyarwanda .text-red-600,
+.brand-filmsnyarwanda .text-red-500 { color: #eab308 !important; }
+.brand-filmsnyarwanda .bg-red-600 { background-color: #ca8a04 !important; }
+.brand-filmsnyarwanda .border-red-600 { border-color: #eab308 !important; }
+.brand-filmsnyarwanda .hover\\:bg-red-700:hover { background-color: #a16207 !important; }
+.brand-filmsnyarwanda .hover\\:text-red-600:hover,
+.brand-filmsnyarwanda .hover\\:text-red-500:hover { color: #fde68a !important; }
+.brand-filmsnyarwanda .filmsnyarwanda-row h3 { color: #fef3c7; }

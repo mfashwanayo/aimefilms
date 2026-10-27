@@ -118,7 +118,7 @@ const Navbar: React.FC<NavbarProps> = ({
   ];
 
   return (
-    <header role="banner" className={`fixed top-0 w-full z-[100] transition-all duration-500 ${isScrolled || isMobileMenuOpen ? 'bg-black/95 backdrop-blur-md shadow-2xl border-b border-white/5' : 'bg-gradient-to-b from-black/95 to-transparent'}`}>
+    <header role="banner" className={`fixed top-0 w-full ${brand === 'princefilms' ? 'md:left-64 md:w-[calc(100%-16rem)]' : ''} z-[100] transition-all duration-500 ${isScrolled || isMobileMenuOpen ? 'bg-black/95 backdrop-blur-md shadow-2xl border-b border-white/5' : 'bg-gradient-to-b from-black/95 to-transparent'}`}>
       <nav aria-label="Main Navigation" className="px-4 md:px-8 lg:px-12 py-4 md:py-5 flex items-center justify-between">
         
         <div className="flex items-center gap-4 md:gap-12">

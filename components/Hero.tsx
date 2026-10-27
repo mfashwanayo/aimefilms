@@ -30,10 +30,10 @@ const Hero: React.FC<HeroProps> = ({ onDiscoverMore, onOpenAuth, user, language,
   const activeBg = brandBg[brand] || brandBg.aimefilms;
 
   return (
-    <section aria-labelledby="hero-title" className="relative w-full min-h-[75vh] md:min-h-[85vh] flex flex-col justify-center px-6 md:px-12 lg:px-24 py-16 md:py-24">
+    <section aria-labelledby="hero-title" className={`relative w-full flex flex-col justify-center py-16 md:py-24 ${brand === 'princefilms' ? 'min-h-[62vh] px-6 md:px-10 lg:px-14' : 'min-h-[75vh] md:min-h-[85vh] px-6 md:px-12 lg:px-24'}`}>
       {/* Background Container with Responsive Mask */}
       <div 
-        className="absolute inset-x-2 md:inset-x-10 top-0 bottom-6 md:bottom-10 hero-mask overflow-hidden z-0 shadow-2xl"
+        className={`absolute top-0 bottom-6 md:bottom-10 hero-mask overflow-hidden z-0 shadow-2xl ${brand === 'princefilms' ? 'inset-x-3 md:inset-x-6 rounded-[1.75rem] border border-violet-300/20' : 'inset-x-2 md:inset-x-10'}`}
         role="presentation"
       >
         <div 
@@ -47,7 +47,7 @@ const Hero: React.FC<HeroProps> = ({ onDiscoverMore, onOpenAuth, user, language,
       </div>
 
       <div className="relative z-10 max-w-5xl animate-in fade-in slide-in-from-bottom-12 duration-1000">
-        <h2 id="hero-title" className="text-4xl sm:text-6xl md:text-8xl lg:text-[9rem] font-[900] mb-6 md:mb-8 leading-[0.9] tracking-tighter italic uppercase text-white drop-shadow-2xl">
+        <h2 id="hero-title" className={`${brand === 'princefilms' ? 'text-4xl sm:text-5xl md:text-6xl lg:text-7xl' : 'text-4xl sm:text-6xl md:text-8xl lg:text-[9rem]'} font-[900] mb-6 md:mb-8 leading-[0.9] tracking-tighter italic uppercase text-white drop-shadow-2xl`}>
           {t.title}<br />
           <span className={activeColor}>{t.reimagined}.</span>
         </h2>
@@ -59,7 +59,7 @@ const Hero: React.FC<HeroProps> = ({ onDiscoverMore, onOpenAuth, user, language,
         <div className="flex flex-col sm:flex-row gap-4 md:gap-6">
           <button 
             onClick={onDiscoverMore}
-            className={`flex items-center justify-center gap-3 md:gap-4 ${brand === 'filmsnyarwanda' ? 'bg-transparent border-2 border-white text-white' : 'bg-black/40 text-white border border-white/20'} px-8 md:px-10 py-5 md:py-6 rounded-2xl font-black text-[10px] md:text-xs uppercase tracking-widest hover:bg-white/10 transition-all backdrop-blur-xl group active:scale-95 shadow-2xl`}
+            className={`flex items-center justify-center gap-3 md:gap-4 ${brand === 'princefilms' ? 'bg-violet-600 text-white border border-violet-300/30 hover:bg-violet-500' : brand === 'filmsnyarwanda' ? 'bg-transparent border-2 border-white text-white' : 'bg-black/40 text-white border border-white/20'} px-8 md:px-10 py-5 md:py-6 rounded-2xl font-black text-[10px] md:text-xs uppercase tracking-widest hover:bg-white/10 transition-all backdrop-blur-xl group active:scale-95 shadow-2xl`}
           >
             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="group-hover:rotate-12 transition-transform md:w-6 md:h-6"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
             {t.exploreBtn}

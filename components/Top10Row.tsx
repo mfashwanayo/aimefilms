@@ -1,26 +1,27 @@
 
 import React from 'react';
-import { StreamingService } from '../types';
+import { Brand, StreamingService } from '../types';
 
 interface Top10RowProps {
   title: string;
   services: StreamingService[];
   onSelect: (service: StreamingService) => void;
+  brand?: Brand;
 }
 
-const Top10Row: React.FC<Top10RowProps> = ({ title, services, onSelect }) => {
+const Top10Row: React.FC<Top10RowProps> = ({ title, services, onSelect, brand = 'aimefilms' }) => {
   // Limit to actual Top 10 and duplicate for infinite marquee
   const top10 = services.slice(0, 10);
   const displayServices = [...top10, ...top10];
 
   return (
-    <section className="mb-20 px-4 md:px-12 relative overflow-hidden group/row">
+    <section className={`mb-20 px-4 md:px-12 relative overflow-hidden group/row ${brand === 'princefilms' ? 'princefilms-top10' : brand === 'filmsnyarwanda' ? 'filmsnyarwanda-top10' : 'aimefilms-top10'}`}>
       {/* Cinematic Header */}
       <div className="flex items-center gap-4 mb-10 px-4">
         <h3 className="text-2xl md:text-4xl font-[1000] text-white uppercase italic tracking-tighter leading-none">
           {title}
         </h3>
-        <div className="h-[1px] flex-1 bg-gradient-to-r from-red-600/50 via-white/5 to-transparent" />
+        <div className={`h-[1px] flex-1 bg-gradient-to-r via-white/5 to-transparent ${brand === 'princefilms' ? 'from-violet-500/60' : brand === 'filmsnyarwanda' ? 'from-yellow-500/60' : 'from-red-600/50'}`} />
       </div>
       
       {/* Infinite Marquee Container */}

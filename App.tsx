@@ -14,6 +14,7 @@ import LegalModal from './components/LegalModal';
 import ContactAdminModal from './components/ContactAdminModal';
 import Logo from './components/Logo';
 import SiteSelector from './components/SiteSelector';
+import PrinceFilmsSidebar from './components/PrinceFilmsSidebar';
 import { AimeFilmsAPI } from './services/api';
 import { StreamingService, User, Language, Brand } from './types';
 import { translations } from './locales/translations';
@@ -154,6 +155,13 @@ const App: React.FC = () => {
     handleGoHome();
   };
 
+  const handleCategoryFilter = (category: string) => {
+    setActiveCategory(category);
+    setSearchQuery('');
+    setSearchResults(null);
+    setCurrentView('home');
+  };
+
   const handleSelectMovie = (movie: StreamingService) => {
     setSelectedService(movie);
     setCurrentView('detail');
@@ -217,13 +225,23 @@ const App: React.FC = () => {
 
   const homeCategories = useMemo(() => {
     if (searchResults || activeCategory !== 'all') {
-      const displayMovies = searchResults || brandMovies.filter(s => {
-        if (activeCategory === 'Movies') return !s.genre.includes('TV Series');
-        if (activeCategory === 'Series') return s.genre.includes('TV Series');
-        if (activeCategory === 'Trending') return s.isTrending;
-        return s.genre.some(g => g.toLowerCase() === activeCategory.toLowerCase());
-      });
-      return [{ id: 'filter-results', title: searchQuery ? `Results for "${searchQuery}"` : activeCategory, services: displayMovies }];
+      const sectionKey = activeCategory === 'Kinyarwanda' ? 'kinyarwanda'
+        : activeCategory === 'Rwanda' ? 'rwanda'
+        : activeCategory === 'English' ? 'english'
+        : null;
+      const displayMovies = searchResults || (sectionKey
+        ? brandMovies.filter(s => s.section === sectionKey)
+        : brandMovies.filter(s => {
+            if (activeCategory === 'Movies') return !s.genre.includes('TV Series');
+            if (activeCategory === 'Series') return s.genre.includes('TV Series');
+            if (activeCategory === 'Trending') return s.isTrending;
+            return s.genre.some(g => g.toLowerCase() === activeCategory.toLowerCase());
+          }));
+      const sectionTitle = activeCategory === 'Kinyarwanda' ? 'Films in Kinyarwanda'
+        : activeCategory === 'Rwanda' ? 'Films in Rwanda'
+        : activeCategory === 'English' ? 'Films in English'
+        : activeCategory;
+      return [{ id: 'filter-results', title: searchQuery ? `Results for "${searchQuery}"` : sectionTitle, services: displayMovies }];
     }
     const categories = [
       { id: 'kinyarwanda', title: 'Films in Kinyarwanda', services: brandMovies.filter(m => m.section === 'kinyarwanda') },
@@ -268,7 +286,7 @@ const App: React.FC = () => {
 
       <Navbar 
         onSearch={setSearchQuery} 
-        onCategoryFilter={(cat) => { setActiveCategory(cat); setSearchQuery(''); setSearchResults(null); setCurrentView('home'); }}
+        onCategoryFilter={handleCategoryFilter}
         onOpenAuth={(mode) => { setAuthMode(mode as any); setIsAuthOpen(true); }}
         onOpenAccount={() => setIsAccountOpen(true)}
         onOpenAdmin={() => setIsAdminOpen(true)}
@@ -281,8 +299,15 @@ const App: React.FC = () => {
         brand={selectedBrand || 'aimefilms'}
         onSwitchBrand={handleSwitchBrand}
       />
+      {selectedBrand === 'princefilms' && (
+        <PrinceFilmsSidebar
+          onHome={handleGoHome}
+          onCategoryFilter={handleCategoryFilter}
+          onSwitchBrand={handleSwitchBrand}
+        />
+      )}
       
-      <main className={showWelcome ? 'hidden' : 'block pt-20'}>
+      <main className={showWelcome ? 'hidden' : `block pt-20 ${selectedBrand === 'princefilms' ? 'md:pl-64' : ''}`} >
         {currentView === 'home' ? (
           <>
             {!searchQuery && activeCategory === 'all' && (
@@ -292,14 +317,14 @@ const App: React.FC = () => {
               
               {!searchQuery && activeCategory === 'all' && trendingMovies.length > 0 && (
                 <div id="top10-section" className="animate-in fade-in slide-in-from-bottom-12 duration-1000">
-                  <Top10Row title={t.nav.top10} services={trendingMovies} onSelect={handleSelectMovie} />
+                  <Top10Row title={t.nav.top10} services={trendingMovies} onSelect={handleSelectMovie} brand={selectedBrand} />
                 </div>
               )}
 
               <div className="space-y-12">
                 {homeCategories.map((cat, idx) => (
                   <div id={cat.id} key={cat.id} className="animate-in fade-in slide-in-from-bottom-8 duration-700" style={{ animationDelay: `${idx * 100}ms` }}>
-                    <StreamingRow title={cat.title} services={cat.services} onSelect={handleSelectMovie} />
+                    <StreamingRow title={cat.title} services={cat.services} onSelect={handleSelectMovie} brand={selectedBrand} />
                   </div>
                 ))}
               </div>

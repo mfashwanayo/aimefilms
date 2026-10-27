@@ -1,15 +1,16 @@
 
 import React, { useRef } from 'react';
-import { StreamingService } from '../types';
+import { Brand, StreamingService } from '../types';
 import ServiceCard from './ServiceCard';
 
 interface StreamingRowProps {
   title: string;
   services: StreamingService[];
   onSelect: (service: StreamingService) => void;
+  brand?: Brand;
 }
 
-const StreamingRow: React.FC<StreamingRowProps> = ({ title, services, onSelect }) => {
+const StreamingRow: React.FC<StreamingRowProps> = ({ title, services, onSelect, brand = 'aimefilms' }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const scroll = (direction: 'left' | 'right') => {
@@ -23,7 +24,7 @@ const StreamingRow: React.FC<StreamingRowProps> = ({ title, services, onSelect }
   const rowId = `row-${title.toLowerCase().replace(/\s+/g, '-')}`;
 
   return (
-    <section aria-labelledby={rowId} className="mb-14 px-6 lg:px-12 relative group">
+    <section aria-labelledby={rowId} className={`mb-14 px-6 lg:px-12 relative group ${brand === 'princefilms' ? 'princefilms-row' : brand === 'filmsnyarwanda' ? 'filmsnyarwanda-row' : 'aimefilms-row'}`}>
       <div className="flex justify-between items-center mb-8">
         <h3 id={rowId} className="text-2xl lg:text-4xl font-black text-white tracking-tight">
           {title}
@@ -32,14 +33,14 @@ const StreamingRow: React.FC<StreamingRowProps> = ({ title, services, onSelect }
           <button 
             onClick={() => scroll('left')}
             aria-label={`Scroll ${title} left`}
-            className="w-10 h-10 rounded-lg bg-[#0c0c0c] border border-white/10 flex items-center justify-center text-white hover:bg-yellow-400 hover:text-black transition-all shadow-xl"
+            className={`w-10 h-10 rounded-lg bg-[#0c0c0c] border border-white/10 flex items-center justify-center text-white transition-all shadow-xl ${brand === 'princefilms' ? 'hover:bg-violet-500 hover:text-white' : brand === 'filmsnyarwanda' ? 'hover:bg-yellow-400 hover:text-black' : 'hover:bg-red-600 hover:text-white'}`}
           >
             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg>
           </button>
           <button 
             onClick={() => scroll('right')}
             aria-label={`Scroll ${title} right`}
-            className="w-10 h-10 rounded-lg bg-[#0c0c0c] border border-white/10 flex items-center justify-center text-white hover:bg-yellow-400 hover:text-black transition-all shadow-xl"
+            className={`w-10 h-10 rounded-lg bg-[#0c0c0c] border border-white/10 flex items-center justify-center text-white transition-all shadow-xl ${brand === 'princefilms' ? 'hover:bg-violet-500 hover:text-white' : brand === 'filmsnyarwanda' ? 'hover:bg-yellow-400 hover:text-black' : 'hover:bg-red-600 hover:text-white'}`}
           >
             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6 6-6"/></svg>
           </button>
