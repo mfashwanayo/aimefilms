@@ -25,6 +25,14 @@ jobs:
         run: python -m pip install -r backend-python/requirements.txt
       - name: Compile Python source
         run: python -m py_compile backend-python/app.py
-      - name: Verify upload API route registration
+      - name: Verify upload route and Swagger authorization
         working-directory: backend-python
-        run: python -c "from app import app; paths = {route.path for route in app.routes}; assert '/api/admin/videos/upload' in paths; print('Video upload route registered')"
+        run: |
+          python - <<'PY'
+          from app import app
+          paths = {route.path for route in app.routes}
+          assert "/api/admin/videos/upload" in paths, "Video upload route missing"
+          upload = app.openapi()["paths"]["/api/admin/videos/upload"]["post"]
+          assert upload.get("security"), "Swagger bearer authorization is missing"
+          print("Video upload route and bearer security registered")
+          PY
