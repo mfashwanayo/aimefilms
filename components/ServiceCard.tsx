@@ -51,7 +51,7 @@ const ServiceCard: React.FC<ServiceCardProps> = ({ service, onClick }) => {
       ) : (
         <div className="mt-4 px-1 text-left">
           <div className="flex justify-between items-start gap-2">
-            <h4 className={`text-white font-black text-lg leading-tight transition-colors line-clamp-1 ${service.brand === 'princefilms' ? 'group-hover:text-violet-300' : service.brand === 'filmsnyarwanda' ? 'group-hover:text-yellow-300' : 'group-hover:text-red-500'}`}>
+            <h4 className={`text-white font-black text-lg leading-tight transition-colors line-clamp-1 ${service.brand === 'princefilms' ? 'group-hover:text-violet-300' : 'group-hover:text-red-500'}`}>
               {service.name}
             </h4>
             <span className="bg-white/5 border border-white/10 text-gray-400 text-[10px] font-black px-1.5 py-0.5 rounded">
@@ -64,7 +64,7 @@ const ServiceCard: React.FC<ServiceCardProps> = ({ service, onClick }) => {
           <div className="flex items-center gap-3 mt-3">
             <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest">{service.year}</span>
             <span aria-hidden="true" className="w-1 h-1 bg-gray-800 rounded-full" />
-            <span className={`text-[10px] font-black uppercase tracking-widest ${service.brand === 'princefilms' ? 'text-violet-300' : service.brand === 'filmsnyarwanda' ? 'text-yellow-500' : 'text-red-600'}`}>{service.genre[0]}</span>
+            <span className={`text-[10px] font-black uppercase tracking-widest ${service.brand === 'princefilms' ? 'text-violet-300' : 'text-red-600'}`}>{service.genre[0]}</span>
           </div>
         </div>
       )}
