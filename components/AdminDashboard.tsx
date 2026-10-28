@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { AimeFilmsAPI } from '../services/api';
-import { backendAdminAddMovie, backendUploadVideo } from '../services/backendApi';
+import { backendUploadVideo } from '../services/backendApi';
 import { StreamingService, User, LogEntry, UserMessage, Brand } from '../types';
 import Logo from './Logo';
 
@@ -20,6 +20,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
   const [messages, setMessages] = useState<UserMessage[]>([]);
   const [stats, setStats] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [adminError, setAdminError] = useState('');
+  const [editingMovieId, setEditingMovieId] = useState<string | null>(null);
   const [selectedVideoFiles, setSelectedVideoFiles] = useState<Partial<Record<'videoUrl' | 'fullMovieUrl', File>>>({});
   const [videoProgress, setVideoProgress] = useState<Partial<Record<'videoUrl' | 'fullMovieUrl', number>>>({});
   const [uploadStatus, setUploadStatus] = useState('');
@@ -65,48 +67,105 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
 
   const loadData = async () => {
     setIsLoading(true);
-    if (activeTab === 'movies') setMovies(await AimeFilmsAPI.getMovies());
-    else if (activeTab === 'users') setUsers(await AimeFilmsAPI.getAllUsers());
-    else if (activeTab === 'history') setLogs(await AimeFilmsAPI.getLogs());
-    else if (activeTab === 'feedback') setMessages(await AimeFilmsAPI.getAllMessages());
-    else if (activeTab === 'analytics') setStats(await AimeFilmsAPI.getIntelligenceData());
-    setIsLoading(false);
+    setAdminError('');
+    try {
+      if (activeTab === 'movies' || activeTab === 'media') setMovies(await AimeFilmsAPI.getAdminMovies());
+      else if (activeTab === 'users') setUsers(await AimeFilmsAPI.getAllUsers());
+      else if (activeTab === 'history') setLogs(await AimeFilmsAPI.getLogs());
+      else if (activeTab === 'feedback') setMessages(await AimeFilmsAPI.getAllMessages());
+      else if (activeTab === 'analytics') setStats(await AimeFilmsAPI.getIntelligenceData());
+    } catch (error) {
+      setAdminError(error instanceof Error ? error.message : 'Could not load data from the database.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleStartNewMovie = () => {
+    setEditingMovieId(null);
+    setSelectedVideoFiles({});
+    setVideoProgress({});
+    setUploadedVideoFields([]);
+    setPendingVideoMovieId(null);
+    setUploadStatus('');
+    setNewMovie({
+      name: '',
+      brand,
+      section: 'kinyarwanda',
+      category: 'General Entertainment',
+      description: '',
+      imageUrl: '',
+      videoUrl: '',
+      fullMovieUrl: '',
+      rating: '8.0',
+      year: String(new Date().getFullYear()),
+      duration: '1h 30m',
+      genre: ['Action'],
+      highlights: [],
+      pros: [],
+      cast: [],
+      synopsis: '',
+      isTrending: false,
+      isNew: true,
+      isHidden: false,
+      matchScore: 90
+    });
+    setIsAddingMovie(true);
+  };
+
+  const handleEditMovie = (movie: StreamingService) => {
+    setEditingMovieId(movie.id);
+    setPendingVideoMovieId(null);
+    setSelectedVideoFiles({});
+    setVideoProgress({});
+    setUploadedVideoFields([]);
+    setUploadStatus('');
+    setNewMovie({
+      ...movie,
+      genre: [...(movie.genre || [])],
+      cast: [...(movie.cast || [])],
+      highlights: [...(movie.highlights || [])],
+      pros: [...(movie.pros || [])]
+    });
+    setIsAddingMovie(true);
   };
 
   const handleAddMovie = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSavingMovie(true);
     setUploadStatus('');
+    setAdminError('');
     try {
       const videoEntries = (Object.entries(selectedVideoFiles) as Array<['videoUrl' | 'fullMovieUrl', File]>)
         .filter(([, file]) => Boolean(file));
+      let movieId = editingMovieId || pendingVideoMovieId;
 
-      if (videoEntries.length === 0) {
+      if (editingMovieId) {
+        // Leave prior URLs in the database until the replacement upload is verified.
+        const metadata: Partial<StreamingService> = { ...newMovie };
+        if (selectedVideoFiles.videoUrl) delete metadata.videoUrl;
+        if (selectedVideoFiles.fullMovieUrl) delete metadata.fullMovieUrl;
+        await AimeFilmsAPI.updateMovie(editingMovieId, metadata);
+      } else if (videoEntries.length === 0) {
         await AimeFilmsAPI.addMovie(newMovie as any);
-      } else {
-        // Persist the movie row first; the following direct resumable uploads
-        // then update its URL as soon as each video finishes uploading.
-        let movieId = pendingVideoMovieId;
-        if (!movieId) {
-          const metadata: Partial<StreamingService> = {
-            ...newMovie,
-            ...(selectedVideoFiles.videoUrl ? { videoUrl: '' } : {}),
-            ...(selectedVideoFiles.fullMovieUrl ? { fullMovieUrl: '' } : {}),
-          };
-          const created = await backendAdminAddMovie(metadata);
-          if (!created?.success || !created.movie?.id) {
-            throw new Error('The movie could not be saved to the database. Check the FastAPI connection and sign in again.');
-          }
-          movieId = created.movie.id;
-          setPendingVideoMovieId(movieId);
-        }
+      } else if (!movieId) {
+        const metadata: Partial<StreamingService> = {
+          ...newMovie,
+          ...(selectedVideoFiles.videoUrl ? { videoUrl: '' } : {}),
+          ...(selectedVideoFiles.fullMovieUrl ? { fullMovieUrl: '' } : {})
+        };
+        const created = await AimeFilmsAPI.addMovie(metadata as any);
+        movieId = created.id;
+        setPendingVideoMovieId(movieId);
+      }
 
+      if (videoEntries.length > 0 && movieId) {
         const completed = new Set(uploadedVideoFields);
         for (const [field, file] of videoEntries) {
           if (completed.has(field)) continue;
           setUploadStatus(`Uploading ${file.name} to Supabase Storage…`);
           setVideoProgress(prev => ({ ...prev, [field]: 0 }));
-          await backendUploadVideo(file, movieId, field, percent => {
+          await backendUploadVideo(file, movieId!, field, percent => {
             setVideoProgress(prev => ({ ...prev, [field]: percent }));
           });
           completed.add(field);
@@ -115,27 +174,52 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
         }
       }
 
-      setUploadStatus('Movie saved successfully.');
+      setUploadStatus(editingMovieId ? 'Film changes saved to the database.' : 'Film saved successfully.');
       setIsAddingMovie(false);
+      setEditingMovieId(null);
       setSelectedVideoFiles({});
       setVideoProgress({});
       setPendingVideoMovieId(null);
       setUploadedVideoFields([]);
-      loadData();
+      await loadData();
       onRefresh();
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Movie upload failed.';
-      setUploadStatus(message);
+      setUploadStatus(error instanceof Error ? error.message : 'Film changes failed.');
     } finally {
       setIsSavingMovie(false);
     }
   };
 
-  const handleDeleteMovie = async (id: string) => {
-    if (confirm('Are you sure you want to delete this film?')) {
-      await AimeFilmsAPI.deleteMovie(id);
-      loadData();
+  const handleDeleteMovie = async (movie: StreamingService) => {
+    if (!confirm(`Delete "${movie.name}" from the database and remove its managed video files?`)) return;
+    setAdminError('');
+    try {
+      await AimeFilmsAPI.deleteMovie(movie.id);
+      await loadData();
       onRefresh();
+    } catch (error) {
+      setAdminError(error instanceof Error ? error.message : 'The film could not be deleted.');
+    }
+  };
+
+  const handleToggleMovieVisibility = async (movie: StreamingService) => {
+    setAdminError('');
+    try {
+      await AimeFilmsAPI.updateMovie(movie.id, { isHidden: !movie.isHidden });
+      await loadData();
+      onRefresh();
+    } catch (error) {
+      setAdminError(error instanceof Error ? error.message : 'The visibility change failed.');
+    }
+  };
+
+  const handleToggleUserBlock = async (email: string) => {
+    setAdminError('');
+    try {
+      await AimeFilmsAPI.toggleUserBlock(email);
+      await loadData();
+    } catch (error) {
+      setAdminError(error instanceof Error ? error.message : 'The user status could not be changed.');
     }
   };
 
@@ -221,19 +305,38 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
 
           <div className="mt-auto space-y-2">
             <button 
-              onClick={() => {
-                const data = {
-                  movies: localStorage.getItem('aimefilms_db_v4'),
-                  users: localStorage.getItem('aimefilms_users_v3'),
-                  analytics: localStorage.getItem('aimefilms_analytics_v1'),
-                  inbox: localStorage.getItem('aimefilms_user_inbox_v1')
-                };
-                const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `aimefilms_backup_${new Date().toISOString().split('T')[0]}.json`;
-                a.click();
+              onClick={async () => {
+                setAdminError('');
+                try {
+                  const [databaseMovies, databaseUsers, databaseLogs, databaseMessages, databaseAnalytics] = await Promise.all([
+                    AimeFilmsAPI.getAdminMovies(),
+                    AimeFilmsAPI.getAllUsers(),
+                    AimeFilmsAPI.getLogs(),
+                    AimeFilmsAPI.getAllMessages(),
+                    AimeFilmsAPI.getIntelligenceData(),
+                  ]);
+                  const data = {
+                    exportedAt: new Date().toISOString(),
+                    movies: databaseMovies,
+                    users: databaseUsers.map(account => ({
+                      name: account.name, email: account.email, role: account.role,
+                      isVerified: account.isVerified, canDownload: account.canDownload,
+                      isBlocked: account.isBlocked, joinedAt: account.joinedAt
+                    })),
+                    logs: databaseLogs,
+                    messages: databaseMessages,
+                    analytics: databaseAnalytics,
+                  };
+                  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = `aimefilms_database_backup_${new Date().toISOString().split('T')[0]}.json`;
+                  a.click();
+                  URL.revokeObjectURL(url);
+                } catch (error) {
+                  setAdminError(error instanceof Error ? error.message : 'Database export failed.');
+                }
               }}
               className="w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold text-sm text-blue-400 hover:bg-blue-400/10 transition-all"
             >
@@ -254,15 +357,22 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
               {activeTab === 'users' && 'User Management'}
               {activeTab === 'history' && 'System History'}
               {activeTab === 'feedback' && 'User Feedback'}
+              {activeTab === 'media' && 'Media Library'}
             </h2>
             {activeTab === 'movies' && (
-              <button onClick={() => setIsAddingMovie(true)} className={`bg-white text-black px-6 py-2 rounded-full font-black text-xs uppercase tracking-widest hover:${currentBrand.bg} hover:text-white transition-all`}>
+              <button onClick={handleStartNewMovie} className={`bg-white text-black px-6 py-2 rounded-full font-black text-xs uppercase tracking-widest hover:${currentBrand.bg} hover:text-white transition-all`}>
                 + Upload New Film
               </button>
             )}
           </header>
 
           <main className="flex-1 overflow-y-auto p-10 no-scrollbar">
+            {adminError && (
+              <div role="alert" className="mb-6 flex items-start justify-between gap-4 rounded-2xl border border-red-500/30 bg-red-500/10 px-5 py-4 text-sm text-red-200">
+                <span>{adminError}</span>
+                <button type="button" onClick={() => setAdminError('')} aria-label="Dismiss error" className="font-black text-red-100">×</button>
+              </div>
+            )}
             {isLoading ? (
               <div className="flex items-center justify-center h-full">
                 <div className={`w-10 h-10 border-4 border-${currentBrand.text.replace('text-', '')} border-t-transparent rounded-full animate-spin`} />
@@ -340,6 +450,12 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
 
                 {activeTab === 'movies' && (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {movies.length === 0 && (
+                      <div className="col-span-full rounded-2xl border border-white/10 bg-white/[0.03] p-8 text-center">
+                        <p className="font-bold text-white">No films are stored in the database yet.</p>
+                        <p className="mt-2 text-sm text-gray-400">Upload a film to create its database record.</p>
+                      </div>
+                    )}
                     {movies.map(movie => (
                       <div key={movie.id} className={`bg-white/5 border border-white/10 rounded-3xl overflow-hidden group hover:border-${currentBrand.text.replace('text-', '')}/50 transition-all`}>
                         <div className="aspect-video relative">
@@ -360,13 +476,16 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
                           </div>
                           <div className="flex gap-2">
                             <button 
-                              onClick={() => AimeFilmsAPI.updateMovie(movie.id, { isHidden: !movie.isHidden }).then(() => { loadData(); onRefresh(); })} 
+                              onClick={() => handleToggleMovieVisibility(movie)} 
                               className={`p-3 rounded-xl transition-all ${movie.isHidden ? 'bg-yellow-600/20 text-yellow-500' : 'bg-green-600/20 text-green-500'}`}
                               title={movie.isHidden ? "Show Movie" : "Hide Movie"}
                             >
                               {movie.isHidden ? '👁️‍🗨️' : '👁️'}
                             </button>
-                            <button onClick={() => handleDeleteMovie(movie.id)} className={`p-3 bg-red-600/10 text-red-500 rounded-xl hover:${currentBrand.bg} hover:text-white transition-all`}>
+                            <button type="button" onClick={() => handleEditMovie(movie)} title="Edit film details" className="p-3 rounded-xl bg-violet-600/10 text-violet-300 hover:bg-violet-600 hover:text-white transition-all">
+                              ✏️
+                            </button>
+                            <button type="button" onClick={() => handleDeleteMovie(movie)} title="Delete film and its managed video files" className={`p-3 bg-red-600/10 text-red-500 rounded-xl hover:${currentBrand.bg} hover:text-white transition-all`}>
                               🗑️
                             </button>
                           </div>
@@ -407,17 +526,28 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
 
                 {activeTab === 'users' && (
                   <div className="bg-white/5 border border-white/10 rounded-3xl overflow-hidden">
-                    <table className="w-full text-left">
+                    <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <p className="text-lg font-black text-white">Registered accounts</p>
+                        <p className="mt-1 text-xs text-gray-500">{users.length} account(s) from the database. Passwords are never displayed.</p>
+                      </div>
+                      <button type="button" onClick={loadData} className="rounded-xl border border-white/10 px-4 py-2 text-xs font-bold text-gray-300 transition hover:bg-white/10">Refresh list</button>
+                    </div>
+                    <div className="bg-white/5 border border-white/10 rounded-3xl overflow-x-auto">
+                    <table className="w-full text-left min-w-[760px]">
                       <thead>
                         <tr className="bg-black/50 text-[10px] font-black text-gray-500 uppercase tracking-widest border-b border-white/10">
-                          <th className="px-8 py-6">User</th>
-                          <th className="px-8 py-6">Password</th>
-                          <th className="px-8 py-6">Status</th>
-                          <th className="px-8 py-6">Joined</th>
-                          <th className="px-8 py-6 text-right">Actions</th>
+                          <th className="px-6 py-5">User</th>
+                          <th className="px-6 py-5">Account details</th>
+                          <th className="px-6 py-5">Status</th>
+                          <th className="px-6 py-5">Joined</th>
+                          <th className="px-6 py-5 text-right">Actions</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-white/5">
+                        {users.length === 0 && (
+                          <tr><td colSpan={5} className="px-6 py-10 text-center text-sm text-gray-400">No accounts have registered in this database yet.</td></tr>
+                        )}
                         {users.map(u => (
                           <tr key={u.email} className="hover:bg-white/[0.02]">
                             <td className="px-8 py-6">
@@ -429,26 +559,31 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
                                 </div>
                               </div>
                             </td>
-                            <td className="px-8 py-6">
-                              <code className="text-[10px] bg-white/5 px-2 py-1 rounded font-mono text-yellow-500">{u.password || '••••••'}</code>
+                            <td className="px-6 py-5">
+                              <div className="space-y-1 text-[10px] text-gray-400">
+                                <p>Role: <span className="font-bold text-white">{u.role === 'admin' ? 'Administrator' : 'User'}</span></p>
+                                <p>Verified: <span className="font-bold text-white">{u.isVerified ? 'Yes' : 'No'}</span></p>
+                                <p>Downloads: <span className="font-bold text-white">{u.canDownload ? 'Allowed' : 'Disabled'}</span></p>
+                              </div>
                             </td>
-                            <td className="px-8 py-6">
-                              <span className={`text-[10px] font-black uppercase px-3 py-1 rounded-full ${u.isBlocked ? 'bg-red-600/20 text-red-500' : 'bg-green-600/20 text-green-500'}`}>
+                            <td className="px-6 py-5">
+                              <span className={`text-[10px] font-black uppercase px-3 py-1 rounded-full ${u.isBlocked ? 'bg-red-600/20 text-red-300' : 'bg-green-600/20 text-green-300'}`}>
                                 {u.isBlocked ? 'Blocked' : 'Active'}
                               </span>
                             </td>
-                            <td className="px-8 py-6 text-xs text-gray-500 font-mono">
+                            <td className="px-6 py-5 text-xs text-gray-500 font-mono">
                               {u.joinedAt?.split('T')[0]}
                             </td>
-                            <td className="px-8 py-6 text-right">
-                              <button onClick={() => AimeFilmsAPI.toggleUserBlock(u.email).then(loadData)} className="text-xs font-black uppercase tracking-widest text-red-500 hover:underline">
-                                {u.isBlocked ? 'Unblock' : 'Block'}
+                            <td className="px-6 py-5 text-right">
+                              <button type="button" disabled={u.role === 'admin'} title={u.role === 'admin' ? 'Administrator accounts are protected' : ''} onClick={() => handleToggleUserBlock(u.email)} className={`text-xs font-black uppercase tracking-widest hover:underline disabled:cursor-not-allowed disabled:text-gray-600 ${u.isBlocked ? 'text-green-400' : 'text-red-400'}`}>
+                                {u.role === 'admin' ? 'Admin protected' : u.isBlocked ? 'Unblock user' : 'Block user'}
                               </button>
                             </td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
+                    </div>
                   </div>
                 )}
 
@@ -516,12 +651,18 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
         </div>
       </div>
 
-      {/* Add Movie Modal */}
+      {/* Add/Edit Movie Modal */}
       {isAddingMovie && (
         <div className="fixed inset-0 z-[1100] flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/95 backdrop-blur-xl" onClick={() => { if (!isSavingMovie) setIsAddingMovie(false); }} />
           <form onSubmit={handleAddMovie} className="relative bg-[#0c0c0c] w-full max-w-2xl p-10 rounded-[3rem] border border-white/10 shadow-2xl space-y-6 max-h-[90vh] overflow-y-auto no-scrollbar">
-            <h3 className="text-3xl font-black italic uppercase tracking-tighter">Upload New Content</h3>
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h3 className="text-3xl font-black italic uppercase tracking-tighter">{editingMovieId ? 'Edit Film Details' : 'Upload New Content'}</h3>
+                <p className="mt-2 text-xs leading-relaxed text-gray-400">{editingMovieId ? 'Changes are saved to the database; replacement video files are attached after upload completes.' : 'Film details are saved to the database before large video uploads begin.'}</p>
+              </div>
+              <button type="button" onClick={() => { if (!isSavingMovie) { setIsAddingMovie(false); setEditingMovieId(null); } }} aria-label="Close film editor" className="text-xl text-gray-400 hover:text-white">×</button>
+            </div>
             
             <div className="grid grid-cols-2 gap-6">
               <div className="space-y-2">
@@ -553,10 +694,52 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
               </div>
             </div>
 
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="space-y-2">
+                <label className="text-[10px] font-black uppercase tracking-widest text-gray-500">Release year</label>
+                <input value={newMovie.year || ''} onChange={e => setNewMovie({...newMovie, year: e.target.value})} className="w-full bg-white/5 border border-white/10 p-4 rounded-2xl outline-none focus:border-purple-500" />
+              </div>
+              <div className="space-y-2">
+                <label className="text-[10px] font-black uppercase tracking-widest text-gray-500">Duration</label>
+                <input value={newMovie.duration || ''} onChange={e => setNewMovie({...newMovie, duration: e.target.value})} placeholder="1h 30m" className="w-full bg-white/5 border border-white/10 p-4 rounded-2xl outline-none focus:border-purple-500" />
+              </div>
+              <div className="space-y-2">
+                <label className="text-[10px] font-black uppercase tracking-widest text-gray-500">Rating</label>
+                <input value={newMovie.rating || ''} onChange={e => setNewMovie({...newMovie, rating: e.target.value})} placeholder="8.0" className="w-full bg-white/5 border border-white/10 p-4 rounded-2xl outline-none focus:border-purple-500" />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-[10px] font-black uppercase tracking-widest text-gray-500">Short description</label>
+              <textarea value={newMovie.description || ''} onChange={e => setNewMovie({...newMovie, description: e.target.value})} rows={2} className="w-full bg-white/5 border border-white/10 p-4 rounded-2xl outline-none focus:border-purple-500 resize-none" />
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="text-[10px] font-black uppercase tracking-widest text-gray-500">Genres (comma separated)</label>
+                <input value={(newMovie.genre || []).join(', ')} onChange={e => setNewMovie({...newMovie, genre: e.target.value.split(',').map(value => value.trim()).filter(Boolean)})} placeholder="Action, Drama" className="w-full bg-white/5 border border-white/10 p-4 rounded-2xl outline-none focus:border-purple-500" />
+              </div>
+              <div className="space-y-2">
+                <label className="text-[10px] font-black uppercase tracking-widest text-gray-500">Cast (comma separated)</label>
+                <input value={(newMovie.cast || []).join(', ')} onChange={e => setNewMovie({...newMovie, cast: e.target.value.split(',').map(value => value.trim()).filter(Boolean)})} placeholder="Actor 1, Actor 2" className="w-full bg-white/5 border border-white/10 p-4 rounded-2xl outline-none focus:border-purple-500" />
+              </div>
+            </div>
+
+            <div className="flex flex-wrap gap-6">
+              <label className="flex items-center gap-3 text-xs font-bold text-gray-300">
+                <input type="checkbox" checked={Boolean(newMovie.isTrending)} onChange={e => setNewMovie({...newMovie, isTrending: e.target.checked})} className="h-4 w-4 accent-purple-500" />
+                Mark as trending
+              </label>
+              <label className="flex items-center gap-3 text-xs font-bold text-gray-300">
+                <input type="checkbox" checked={Boolean(newMovie.isNew)} onChange={e => setNewMovie({...newMovie, isNew: e.target.checked})} className="h-4 w-4 accent-purple-500" />
+                Mark as new arrival
+              </label>
+            </div>
+
             <div className="space-y-2">
               <label className="text-[10px] font-black uppercase tracking-widest text-gray-500">Image (Poster)</label>
               <div className="flex gap-4">
-                <input value={newMovie.imageUrl} onChange={e => setNewMovie({...newMovie, imageUrl: e.target.value})} placeholder="URL" className="flex-1 bg-white/5 border border-white/10 p-4 rounded-2xl outline-none focus:border-red-600" />
+                <input value={newMovie.imageUrl || ''} onChange={e => setNewMovie({...newMovie, imageUrl: e.target.value})} placeholder="Poster URL or choose a local image" className="flex-1 bg-white/5 border border-white/10 p-4 rounded-2xl outline-none focus:border-red-600" />
                 <label className="bg-white/10 hover:bg-white/20 p-4 rounded-2xl cursor-pointer transition-all">
                   📁
                   <input type="file" accept="image/*" className="hidden" onChange={e => handleFileChange(e, 'imageUrl')} />
@@ -639,11 +822,11 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
 
             <div className="space-y-2">
               <label className="text-[10px] font-black uppercase tracking-widest text-gray-500">Synopsis</label>
-              <textarea required value={newMovie.synopsis} onChange={e => setNewMovie({...newMovie, synopsis: e.target.value})} rows={4} className={`w-full bg-white/5 border border-white/10 p-4 rounded-2xl outline-none focus:border-${currentBrand.text.replace('text-', '')} resize-none`} />
+              <textarea required value={newMovie.synopsis || ''} onChange={e => setNewMovie({...newMovie, synopsis: e.target.value})} rows={4} className={`w-full bg-white/5 border border-white/10 p-4 rounded-2xl outline-none focus:border-${currentBrand.text.replace('text-', '')} resize-none`} />
             </div>
 
             <button type="submit" disabled={isSavingMovie} className={`w-full ${currentBrand.bg} text-white py-5 rounded-2xl font-black uppercase tracking-widest shadow-xl ${currentBrand.shadow} hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-50 disabled:cursor-wait`}>
-              {isSavingMovie ? 'Saving / Uploading…' : 'Commit to Database'}
+              {isSavingMovie ? 'Saving / Uploading…' : editingMovieId ? 'Save Film Changes' : 'Commit to Database'}
             </button>
           </form>
         </div>
