@@ -41,6 +41,17 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
   };
 
   const currentBrand = brandColors[brand] || brandColors.aimefilms;
+  // Default to the website from which the admin dashboard was opened, while
+  // still allowing administrators to manage any movie across all three sites.
+  const [catalogueFilter, setCatalogueFilter] = useState<Brand | 'all'>(brand);
+  const filteredMovies = useMemo(
+    () => catalogueFilter === 'all' ? movies : movies.filter(movie => movie.brand === catalogueFilter),
+    [movies, catalogueFilter]
+  );
+
+  useEffect(() => {
+    setCatalogueFilter(brand);
+  }, [brand]);
 
   // Movie Form State
   const [isAddingMovie, setIsAddingMovie] = useState(false);
@@ -422,10 +433,26 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
               {activeTab === 'feedback' && 'User Feedback'}
               {activeTab === 'media' && 'Media Library'}
             </h2>
-            {activeTab === 'movies' && (
-              <button onClick={handleStartNewMovie} className={`bg-white text-black px-6 py-2 rounded-full font-black text-xs uppercase tracking-widest hover:${currentBrand.bg} hover:text-white transition-all`}>
-                + Upload New Film
-              </button>
+            {(activeTab === 'movies' || activeTab === 'media') && (
+              <div className="flex flex-wrap items-center justify-end gap-3">
+                <label htmlFor="admin-brand-filter" className="sr-only">Filter movie catalogue by website</label>
+                <select
+                  id="admin-brand-filter"
+                  value={catalogueFilter}
+                  onChange={e => setCatalogueFilter(e.target.value as Brand | 'all')}
+                  className="max-w-[220px] rounded-xl border border-white/10 bg-[#151515] px-4 py-2 text-xs font-bold text-white outline-none focus:border-violet-400"
+                >
+                  <option value="aimefilms">AimeFilms films</option>
+                  <option value="filmsnyarwanda">FilmsNyarwanda films</option>
+                  <option value="princefilms">PrinceFilms films</option>
+                  <option value="all">All websites — all films</option>
+                </select>
+                {activeTab === 'movies' && (
+                  <button onClick={handleStartNewMovie} className={`bg-white text-black px-6 py-2 rounded-full font-black text-xs uppercase tracking-widest hover:${currentBrand.bg} hover:text-white transition-all`}>
+                    + Upload New Film
+                  </button>
+                )}
+              </div>
             )}
           </header>
 
@@ -513,13 +540,15 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
 
                 {activeTab === 'movies' && (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {movies.length === 0 && (
+                    {filteredMovies.length === 0 && (
                       <div className="col-span-full rounded-2xl border border-white/10 bg-white/[0.03] p-8 text-center">
-                        <p className="font-bold text-white">No films are stored in the database yet.</p>
-                        <p className="mt-2 text-sm text-gray-400">Upload a film to create its database record.</p>
+                        <p className="font-bold text-white">
+                          {catalogueFilter === 'all' ? 'No films are stored in the database yet.' : `No films found for ${catalogueFilter === 'filmsnyarwanda' ? 'FilmsNyarwanda' : catalogueFilter === 'princefilms' ? 'PrinceFilms' : 'AimeFilms'}.`}
+                        </p>
+                        <p className="mt-2 text-sm text-gray-400">Choose another website filter, or upload a film to create its database record.</p>
                       </div>
                     )}
-                    {movies.map(movie => (
+                    {filteredMovies.map(movie => (
                       <div key={movie.id} className={`bg-white/5 border border-white/10 rounded-3xl overflow-hidden group hover:border-${currentBrand.text.replace('text-', '')}/50 transition-all`}>
                         <div className="aspect-video relative">
                           <img src={movie.imageUrl} className="w-full h-full object-cover opacity-60 group-hover:opacity-100 transition-all" />
@@ -565,7 +594,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
                       <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">All uploaded assets are stored in the system core.</p>
                     </div>
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                      {movies.map(movie => {
+                      {filteredMovies.map(movie => {
                         const mediaUrl = movie.fullMovieUrl || movie.videoUrl;
                         const storagePath = mediaUrl?.includes('/aimefilms-videos/')
                           ? mediaUrl.split('/aimefilms-videos/').pop()
