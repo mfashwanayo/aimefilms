@@ -111,3 +111,42 @@
 .brand-filmsnyarwanda .hover\:text-red-600:hover,
 .brand-filmsnyarwanda .hover\:text-red-500:hover { color: #fde68a !important; }
 .brand-filmsnyarwanda .filmsnyarwanda-row h3 { color: #fef3c7; }
+
+
+/* PrinceFilms uses a catalogue grid like a modern streaming app; the other brands keep their own carousel layouts. */
+.brand-princefilms .princefilms-sidebar .princefilms-nav-link.is-active {
+  color: #fff;
+  background: linear-gradient(105deg, rgba(139, 92, 246, 0.22), rgba(139, 92, 246, 0.07));
+  border-color: rgba(167, 139, 250, 0.23);
+  box-shadow: inset 2px 0 0 #a78bfa;
+}
+.brand-princefilms .princefilms-nav-link.is-active .princefilms-nav-icon {
+  color: white;
+  background: #7c3aed;
+}
+.brand-princefilms .princefilms-row h3,
+.brand-princefilms .princefilms-top10 h3 {
+  letter-spacing: -0.025em;
+}
+.brand-princefilms .princefilms-card .mt-4 {
+  margin-top: 0.55rem;
+}
+.brand-princefilms .princefilms-card h4 {
+  font-size: 0.86rem;
+  line-height: 1.35;
+}
+.brand-princefilms .princefilms-card .text-xs {
+  font-size: 0.69rem;
+}
+.brand-princefilms main {
+  background-image: radial-gradient(ellipse at 80% 0%, rgba(124, 58, 237, 0.07), transparent 40%);
+}
+@media (max-width: 639px) {
+  .brand-princefilms .princefilms-row {
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+  .brand-princefilms .princefilms-card .mt-4 {
+    margin-top: 0.45rem;
+  }
+}

@@ -17,12 +17,14 @@ const ServiceCard: React.FC<ServiceCardProps> = ({ service, onClick }) => {
       tabIndex={0}
       onKeyDown={(e) => e.key === 'Enter' && onClick()}
       aria-label={`View details for ${service.name}`}
-      className={`flex-none relative cursor-pointer group transition-all duration-300 focus-visible:scale-[1.02] ${service.brand === 'princefilms' ? 'w-40 sm:w-44 md:w-48 princefilms-card' : service.brand === 'filmsnyarwanda' ? 'w-44 md:w-52 filmsnyarwanda-card' : 'w-56 md:w-64 aimefilms-card'}`}
+      className={`flex-none relative cursor-pointer group transition-all duration-300 focus-visible:scale-[1.02] ${service.brand === 'princefilms' ? 'w-full min-w-0 princefilms-card' : service.brand === 'filmsnyarwanda' ? 'w-44 md:w-52 filmsnyarwanda-card' : 'w-56 md:w-64 aimefilms-card'}`}
     >
       <div className={`relative aspect-[2/3] overflow-hidden ${service.brand === 'filmsnyarwanda' ? 'rounded-t-2xl' : service.brand === 'princefilms' ? 'rounded-xl' : 'rounded-2xl'} transition-all duration-500 shadow-xl group-hover:-translate-y-2 ${service.brand === 'princefilms' ? 'group-hover:shadow-violet-600/30' : service.brand === 'filmsnyarwanda' ? 'group-hover:shadow-yellow-400/20' : 'group-hover:shadow-red-600/20'}`}>
         <img 
           src={service.imageUrl} 
           alt={`Poster for ${service.name}`}
+          loading="lazy"
+          decoding="async"
           className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
         />
         

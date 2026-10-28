@@ -125,7 +125,7 @@ const Navbar: React.FC<NavbarProps> = ({
           {/* Mobile Menu Toggle */}
           <button 
             onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-            className="lg:hidden p-2 text-white hover:text-red-600 transition-colors"
+            className={`lg:hidden p-2 transition-colors ${brand === 'princefilms' ? 'hover:text-violet-300' : 'hover:text-red-600'}`}
           >
             {isMobileMenuOpen ? (
               <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
@@ -134,11 +134,17 @@ const Navbar: React.FC<NavbarProps> = ({
             )}
           </button>
 
-          <button onClick={handleLogoPress} className="hover:scale-105 transition-transform flex-shrink-0">
+          <button onClick={handleLogoPress} className={`hover:scale-105 transition-transform flex-shrink-0 ${brand === 'princefilms' ? 'md:hidden' : ''}`}>
             <Logo size="sm" brand={brand} />
           </button>
           
-          <div className="hidden lg:flex gap-10 text-[10px] font-black uppercase tracking-[0.3em] text-gray-400">
+          {brand === 'princefilms' && (
+            <div className="hidden md:flex flex-col gap-1">
+              <span className="text-[9px] font-extrabold uppercase tracking-[0.28em] text-violet-300/70">PRINCEFILMS</span>
+              <span className="text-sm font-bold tracking-tight text-white">Discover your next favourite</span>
+            </div>
+          )}
+          <div className={`${brand === 'princefilms' ? 'hidden' : 'hidden lg:flex'} gap-10 text-[10px] font-black uppercase tracking-[0.3em] text-gray-400`}>
             <button onClick={handleLogoPress} className="hover:text-white transition-colors uppercase">{t.relay}</button>
             <button onClick={() => onCategoryFilter('Series')} className="hover:text-white transition-colors uppercase">{t.series}</button>
             {brand === 'filmsnyarwanda' && (
@@ -204,7 +210,7 @@ const Navbar: React.FC<NavbarProps> = ({
               ref={searchInputRef}
               type="text"
               placeholder={t.query}
-              className={`bg-transparent text-white text-[10px] md:text-xs outline-none transition-all duration-500 font-black tracking-widest uppercase ${isSearchVisible ? 'w-24 md:w-72 ml-2 md:ml-3 opacity-100' : 'w-0 opacity-0'}`}
+              className={`bg-transparent text-white text-[10px] md:text-xs outline-none transition-all duration-500 font-black tracking-widest uppercase placeholder:text-gray-500 ${isSearchVisible ? 'w-24 md:w-72 ml-2 md:ml-3 opacity-100' : 'w-0 opacity-0'}`}
               value={searchQuery}
               onChange={handleSearchChange}
             />

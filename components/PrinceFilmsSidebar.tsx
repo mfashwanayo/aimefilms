@@ -5,6 +5,7 @@ interface PrinceFilmsSidebarProps {
   onHome: () => void;
   onCategoryFilter: (category: string) => void;
   onSwitchBrand: () => void;
+  activeCategory: string;
 }
 
 const discoveryItems = [
@@ -26,18 +27,28 @@ const languageItems = [
   { label: 'English', icon: 'EN', category: 'English' },
 ];
 
-const PrinceFilmsSidebar: React.FC<PrinceFilmsSidebarProps> = ({ onHome, onCategoryFilter, onSwitchBrand }) => {
-  const renderItems = (items: { label: string; icon: string; category: string | null }[]) => items.map((item) => (
-    <button
-      key={item.label}
-      type="button"
-      onClick={() => item.category ? onCategoryFilter(item.category) : onHome()}
-      className="princefilms-nav-link"
-    >
-      <span className="princefilms-nav-icon">{item.icon}</span>
-      <span>{item.label}</span>
-    </button>
-  ));
+const PrinceFilmsSidebar: React.FC<PrinceFilmsSidebarProps> = ({
+  onHome,
+  onCategoryFilter,
+  onSwitchBrand,
+  activeCategory,
+}) => {
+  const renderItems = (items: { label: string; icon: string; category: string | null }[]) =>
+    items.map((item) => {
+      const isActive = item.category === null ? activeCategory === 'all' : activeCategory === item.category;
+      return (
+        <button
+          key={item.label}
+          type="button"
+          aria-current={isActive ? 'page' : undefined}
+          onClick={() => item.category ? onCategoryFilter(item.category) : onHome()}
+          className={`princefilms-nav-link ${isActive ? 'is-active' : ''}`}
+        >
+          <span className="princefilms-nav-icon">{item.icon}</span>
+          <span>{item.label}</span>
+        </button>
+      );
+    });
 
   return (
     <aside aria-label="PrinceFilms browsing menu" className="princefilms-sidebar hidden md:flex fixed left-0 top-0 bottom-0 z-[95] w-64 flex-col border-r border-white/10 px-4 pb-5 pt-6">
@@ -62,8 +73,8 @@ const PrinceFilmsSidebar: React.FC<PrinceFilmsSidebarProps> = ({ onHome, onCateg
 
       <div className="rounded-2xl border border-violet-300/15 bg-gradient-to-br from-violet-500/15 to-fuchsia-500/5 p-4">
         <p className="text-[10px] font-extrabold uppercase tracking-[0.18em] text-violet-200">PrinceFilms</p>
-        <p className="mt-2 text-sm font-bold leading-snug text-white">Your next favorite story starts here.</p>
-        <p className="mt-1 text-xs leading-relaxed text-white/45">Browse the collection by genre, language, or what is trending.</p>
+        <p className="mt-2 text-sm font-bold leading-snug text-white">Discover your next favourite.</p>
+        <p className="mt-1 text-xs leading-relaxed text-white/45">Explore films by genre, language and what is trending now.</p>
       </div>
 
       <button type="button" onClick={onSwitchBrand} className="mt-4 flex items-center gap-3 rounded-xl px-3 py-3 text-left text-xs font-bold text-white/45 transition hover:bg-white/5 hover:text-white">

@@ -304,6 +304,7 @@ const App: React.FC = () => {
           onHome={handleGoHome}
           onCategoryFilter={handleCategoryFilter}
           onSwitchBrand={handleSwitchBrand}
+          activeCategory={activeCategory}
         />
       )}
       
@@ -313,7 +314,7 @@ const App: React.FC = () => {
             {!searchQuery && activeCategory === 'all' && (
               <Hero onDiscoverMore={() => document.getElementById('top10-section')?.scrollIntoView({ behavior: 'smooth' })} onOpenAuth={(mode) => { setAuthMode(mode as any); setIsAuthOpen(true); }} user={user} language={language} brand={selectedBrand || 'aimefilms'} />
             )}
-            <div className={`relative ${ (searchQuery || activeCategory !== 'all') ? 'pt-10' : '-mt-32'} z-20 pb-40 space-y-16`}>
+            <div className={`relative ${selectedBrand === 'princefilms' ? '-mt-8' : (searchQuery || activeCategory !== 'all') ? 'pt-10' : '-mt-32'} z-20 pb-40 space-y-12 md:space-y-16`}>
               
               {!searchQuery && activeCategory === 'all' && trendingMovies.length > 0 && (
                 <div id="top10-section" className="animate-in fade-in slide-in-from-bottom-12 duration-1000">
