@@ -889,6 +889,44 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
               </div>
             )}
 
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="text-[10px] font-black uppercase tracking-widest text-gray-500">Website / watch link</label>
+                <input value={newMovie.link || ''} onChange={e => setNewMovie({ ...newMovie, link: e.target.value })} placeholder="https://..." className="w-full bg-white/5 border border-white/10 p-4 rounded-2xl outline-none focus:border-purple-500" />
+              </div>
+              <div className="space-y-2">
+                <label className="text-[10px] font-black uppercase tracking-widest text-gray-500">Studio / logo image URL</label>
+                <input value={newMovie.logoUrl || ''} onChange={e => setNewMovie({ ...newMovie, logoUrl: e.target.value })} placeholder="https://..." className="w-full bg-white/5 border border-white/10 p-4 rounded-2xl outline-none focus:border-purple-500" />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="text-[10px] font-black uppercase tracking-widest text-gray-500">Highlights (comma separated)</label>
+                <input value={(newMovie.highlights || []).join(', ')} onChange={e => setNewMovie({ ...newMovie, highlights: e.target.value.split(',').map(value => value.trim()).filter(Boolean) })} placeholder="4K, Subtitles, New release" className="w-full bg-white/5 border border-white/10 p-4 rounded-2xl outline-none focus:border-purple-500" />
+              </div>
+              <div className="space-y-2">
+                <label className="text-[10px] font-black uppercase tracking-widest text-gray-500">Features / pros (comma separated)</label>
+                <input value={(newMovie.pros || []).join(', ')} onChange={e => setNewMovie({ ...newMovie, pros: e.target.value.split(',').map(value => value.trim()).filter(Boolean) })} placeholder="HD, English subtitles" className="w-full bg-white/5 border border-white/10 p-4 rounded-2xl outline-none focus:border-purple-500" />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="text-[10px] font-black uppercase tracking-widest text-gray-500">Price / access note</label>
+                <input value={newMovie.price || ''} onChange={e => setNewMovie({ ...newMovie, price: e.target.value })} placeholder="Free, subscription, etc." className="w-full bg-white/5 border border-white/10 p-4 rounded-2xl outline-none focus:border-purple-500" />
+              </div>
+              <div className="space-y-2">
+                <label className="text-[10px] font-black uppercase tracking-widest text-gray-500">Recommendation match score (0–100)</label>
+                <input type="number" min="0" max="100" value={newMovie.matchScore ?? 0} onChange={e => setNewMovie({ ...newMovie, matchScore: Math.max(0, Math.min(100, Number(e.target.value) || 0)) })} className="w-full bg-white/5 border border-white/10 p-4 rounded-2xl outline-none focus:border-purple-500" />
+              </div>
+            </div>
+
+            <label className="flex items-center gap-3 text-xs font-bold text-gray-300">
+              <input type="checkbox" checked={Boolean(newMovie.isHidden)} onChange={e => setNewMovie({ ...newMovie, isHidden: e.target.checked })} className="h-4 w-4 accent-purple-500" />
+              Hide this film from the public catalogue
+            </label>
+
             <div className="space-y-2">
               <label className="text-[10px] font-black uppercase tracking-widest text-gray-500">Synopsis</label>
               <textarea required value={newMovie.synopsis || ''} onChange={e => setNewMovie({...newMovie, synopsis: e.target.value})} rows={4} className={`w-full bg-white/5 border border-white/10 p-4 rounded-2xl outline-none focus:border-${currentBrand.text.replace('text-', '')} resize-none`} />
