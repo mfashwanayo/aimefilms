@@ -28,6 +28,9 @@ async function backendAdminGetMovies(): Promise<any> {
 async function backendAdminToggleBlock(email: string): Promise<any> {
   return apiFetch<any>(`/api/admin/users/${encodeURIComponent(email)}/toggle-block`, { method: 'POST' });
 }
+async function backendAdminUpdateUser(email: string, updates: Partial<Pick<User, 'name' | 'avatar' | 'language' | 'isVerified' | 'canDownload'>>): Promise<any> {
+  return apiFetch<any>(`/api/admin/users/${encodeURIComponent(email)}`, { method: 'PUT', body: JSON.stringify(updates) });
+}
 async function backendAdminGetLogs(): Promise<any> {
   return apiFetch<any>('/api/admin/logs');
 }
@@ -337,6 +340,13 @@ export class AimeFilmsAPI {
     const res = await backendUpdateProfile(updates.name, updates.avatar);
     if (!res?.success) throw new Error('The profile changes were not saved to the database.');
     return true;
+  }
+
+  static async updateManagedUser(email: string, updates: Partial<Pick<User, 'name' | 'avatar' | 'language' | 'isVerified' | 'canDownload'>>): Promise<User> {
+    if (!getAuthToken()) throw new Error('Please sign in as an administrator to manage users.');
+    const res = await backendAdminUpdateUser(email, updates);
+    if (!res?.success || !res.user?.email) throw new Error('The account changes were not saved to the database.');
+    return res.user as User;
   }
 
   static async toggleUserBlock(email: string): Promise<boolean> {

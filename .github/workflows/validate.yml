@@ -52,6 +52,7 @@ jobs:
               "/api/admin/movies",
               "/api/admin/movies/{movie_id}",
               "/api/admin/users",
+              "/api/admin/users/{email}",
               "/api/admin/users/{email}/toggle-block",
               "/api/admin/messages",
               "/api/auth/register",

@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { AimeFilmsAPI } from '../services/api';
 import { backendUploadVideo } from '../services/backendApi';
-import { StreamingService, User, LogEntry, UserMessage, Brand } from '../types';
+import { StreamingService, User, LogEntry, UserMessage, Brand, Language } from '../types';
 import Logo from './Logo';
 
 interface AdminDashboardProps {
@@ -16,6 +16,11 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
   const [activeTab, setActiveTab] = useState<'movies' | 'users' | 'history' | 'feedback' | 'analytics' | 'media'>('analytics');
   const [movies, setMovies] = useState<StreamingService[]>([]);
   const [users, setUsers] = useState<User[]>([]);
+  const [editingUser, setEditingUser] = useState<User | null>(null);
+  const [userEditForm, setUserEditForm] = useState<{ name: string; avatar: string; language: Language; isVerified: boolean; canDownload: boolean }>({
+    name: '', avatar: '', language: 'EN', isVerified: true, canDownload: true
+  });
+  const [isSavingUser, setIsSavingUser] = useState(false);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [messages, setMessages] = useState<UserMessage[]>([]);
   const [stats, setStats] = useState<any>(null);
@@ -63,6 +68,24 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
     if (isOpen) {
       loadData();
     }
+  }, [isOpen, activeTab]);
+
+  useEffect(() => {
+    if (!isOpen || activeTab !== 'users') return;
+    let active = true;
+    const refreshUsersSilently = async () => {
+      try {
+        const latestUsers = await AimeFilmsAPI.getAllUsers();
+        if (active) setUsers(latestUsers);
+      } catch {
+        // Keep the last successful list visible if a periodic refresh has a network issue.
+      }
+    };
+    const interval = window.setInterval(refreshUsersSilently, 15000);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+    };
   }, [isOpen, activeTab]);
 
   const loadData = async () => {
@@ -210,6 +233,46 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
       onRefresh();
     } catch (error) {
       setAdminError(error instanceof Error ? error.message : 'The visibility change failed.');
+    }
+  };
+
+  const handleEditUser = (account: User) => {
+    setEditingUser(account);
+    setUserEditForm({
+      name: account.name || '',
+      avatar: account.avatar || '',
+      language: account.language || 'EN',
+      isVerified: account.isVerified ?? false,
+      canDownload: account.canDownload ?? true,
+    });
+    setAdminError('');
+  };
+
+  const handleSaveUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingUser) return;
+    setIsSavingUser(true);
+    setAdminError('');
+    try {
+      await AimeFilmsAPI.updateManagedUser(editingUser.email, userEditForm);
+      setEditingUser(null);
+      await loadData();
+    } catch (error) {
+      setAdminError(error instanceof Error ? error.message : 'The account changes could not be saved.');
+    } finally {
+      setIsSavingUser(false);
+    }
+  };
+
+  const handleToggleUserFlag = async (email: string, field: 'isVerified' | 'canDownload', currentValue: boolean) => {
+    setAdminError('');
+    try {
+      const updates: Partial<Pick<User, 'isVerified' | 'canDownload'>> = {};
+      updates[field] = !currentValue;
+      await AimeFilmsAPI.updateManagedUser(email, updates);
+      await loadData();
+    } catch (error) {
+      setAdminError(error instanceof Error ? error.message : 'The account setting could not be updated.');
     }
   };
 
@@ -534,7 +597,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
                       <button type="button" onClick={loadData} className="rounded-xl border border-white/10 px-4 py-2 text-xs font-bold text-gray-300 transition hover:bg-white/10">Refresh list</button>
                     </div>
                     <div className="bg-white/5 border border-white/10 rounded-3xl overflow-x-auto">
-                    <table className="w-full text-left min-w-[760px]">
+                    <table className="w-full text-left min-w-[980px]">
                       <thead>
                         <tr className="bg-black/50 text-[10px] font-black text-gray-500 uppercase tracking-widest border-b border-white/10">
                           <th className="px-6 py-5">User</th>
@@ -552,7 +615,9 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
                           <tr key={u.email} className="hover:bg-white/[0.02]">
                             <td className="px-8 py-6">
                               <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 rounded-lg bg-white/10 flex items-center justify-center font-black">{u.name.charAt(0)}</div>
+                                <div className="w-10 h-10 rounded-lg bg-white/10 overflow-hidden flex items-center justify-center font-black">
+                                   {u.avatar ? <img src={u.avatar} alt="" className="w-full h-full object-cover" /> : u.name.charAt(0).toUpperCase()}
+                                 </div>
                                 <div>
                                   <p className="font-black italic">{u.name}</p>
                                   <p className="text-[10px] text-gray-500">{u.email}</p>
@@ -564,6 +629,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
                                 <p>Role: <span className="font-bold text-white">{u.role === 'admin' ? 'Administrator' : 'User'}</span></p>
                                 <p>Verified: <span className="font-bold text-white">{u.isVerified ? 'Yes' : 'No'}</span></p>
                                 <p>Downloads: <span className="font-bold text-white">{u.canDownload ? 'Allowed' : 'Disabled'}</span></p>
+                                 <p>Language: <span className="font-bold text-white">{u.language || 'EN'}</span></p>
                               </div>
                             </td>
                             <td className="px-6 py-5">
@@ -574,11 +640,14 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
                             <td className="px-6 py-5 text-xs text-gray-500 font-mono">
                               {u.joinedAt?.split('T')[0]}
                             </td>
-                            <td className="px-6 py-5 text-right">
-                              <button type="button" disabled={u.role === 'admin'} title={u.role === 'admin' ? 'Administrator accounts are protected' : ''} onClick={() => handleToggleUserBlock(u.email)} className={`text-xs font-black uppercase tracking-widest hover:underline disabled:cursor-not-allowed disabled:text-gray-600 ${u.isBlocked ? 'text-green-400' : 'text-red-400'}`}>
-                                {u.role === 'admin' ? 'Admin protected' : u.isBlocked ? 'Unblock user' : 'Block user'}
-                              </button>
-                            </td>
+                            <td className="px-6 py-5">
+                               <div className="flex flex-col items-end gap-2">
+                                 <button type="button" onClick={() => handleEditUser(u)} disabled={u.role === 'admin'} className="text-[10px] font-black uppercase tracking-widest text-violet-300 hover:text-white disabled:text-gray-600 disabled:cursor-not-allowed">Edit account</button>
+                                 <button type="button" disabled={u.role === 'admin'} onClick={() => handleToggleUserFlag(u.email, 'isVerified', Boolean(u.isVerified))} className={`text-[10px] font-black uppercase tracking-widest hover:underline disabled:text-gray-600 disabled:cursor-not-allowed ${u.isVerified ? 'text-amber-300' : 'text-green-300'}`}>{u.isVerified ? 'Unverify' : 'Verify'}</button>
+                                 <button type="button" disabled={u.role === 'admin'} onClick={() => handleToggleUserFlag(u.email, 'canDownload', Boolean(u.canDownload))} className="text-[10px] font-black uppercase tracking-widest text-blue-300 hover:underline disabled:text-gray-600 disabled:cursor-not-allowed">{u.canDownload ? 'Disable downloads' : 'Enable downloads'}</button>
+                                 <button type="button" disabled={u.role === 'admin'} title={u.role === 'admin' ? 'Administrator accounts are protected' : ''} onClick={() => handleToggleUserBlock(u.email)} className={`text-[10px] font-black uppercase tracking-widest hover:underline disabled:cursor-not-allowed disabled:text-gray-600 ${u.isBlocked ? 'text-green-400' : 'text-red-400'}`}>{u.role === 'admin' ? 'Admin protected' : u.isBlocked ? 'Unblock user' : 'Block user'}</button>
+                               </div>
+                             </td>
                           </tr>
                         ))}
                       </tbody>
@@ -828,6 +897,50 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
             <button type="submit" disabled={isSavingMovie} className={`w-full ${currentBrand.bg} text-white py-5 rounded-2xl font-black uppercase tracking-widest shadow-xl ${currentBrand.shadow} hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-50 disabled:cursor-wait`}>
               {isSavingMovie ? 'Saving / Uploading…' : editingMovieId ? 'Save Film Changes' : 'Commit to Database'}
             </button>
+          </form>
+        </div>
+      )}
+      {editingUser && (
+        <div className="fixed inset-0 z-[1200] flex items-center justify-center p-4 md:p-8" role="dialog" aria-modal="true" aria-labelledby="edit-user-title">
+          <button type="button" aria-label="Close account editor" disabled={isSavingUser} onClick={() => setEditingUser(null)} className="absolute inset-0 bg-black/80 backdrop-blur-sm" />
+          <form onSubmit={handleSaveUser} className="relative z-10 w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-3xl border border-white/10 bg-[#101014] p-6 md:p-8 shadow-2xl space-y-5">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-[0.25em] text-violet-300">User Registry</p>
+                <h3 id="edit-user-title" className="mt-2 text-2xl font-black text-white">Edit account</h3>
+                <p className="mt-1 text-xs text-gray-400 break-all">{editingUser.email}</p>
+              </div>
+              <button type="button" disabled={isSavingUser} onClick={() => setEditingUser(null)} className="text-2xl leading-none text-gray-400 hover:text-white disabled:opacity-50">×</button>
+            </div>
+            <p className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-xs leading-relaxed text-gray-400">
+              Account changes are saved to the database after you press Save. Email, password and administrator role are protected; passwords and password hashes are never displayed.
+            </p>
+            <div className="space-y-2">
+              <label htmlFor="admin-user-name" className="block text-[10px] font-black uppercase tracking-widest text-gray-500">Display name</label>
+              <input id="admin-user-name" required maxLength={120} value={userEditForm.name} onChange={e => setUserEditForm({ ...userEditForm, name: e.target.value })} className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-white outline-none focus:border-violet-400" />
+            </div>
+            <div className="space-y-2">
+              <label htmlFor="admin-user-avatar" className="block text-[10px] font-black uppercase tracking-widest text-gray-500">Avatar image URL or data image (optional)</label>
+              <input id="admin-user-avatar" type="text" maxLength={2000000} value={userEditForm.avatar} onChange={e => setUserEditForm({ ...userEditForm, avatar: e.target.value })} placeholder="https://..." className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-white outline-none focus:border-violet-400" />
+            </div>
+            <div className="space-y-2">
+              <label htmlFor="admin-user-language" className="block text-[10px] font-black uppercase tracking-widest text-gray-500">Preferred language</label>
+              <select id="admin-user-language" value={userEditForm.language} onChange={e => setUserEditForm({ ...userEditForm, language: e.target.value as Language })} className="w-full rounded-xl border border-white/10 bg-[#191820] px-4 py-3 text-white outline-none focus:border-violet-400">
+                <option value="EN">English</option><option value="RW">Kinyarwanda</option><option value="FR">Français</option><option value="SW">Kiswahili</option><option value="ZH">中文</option>
+              </select>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <label className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.03] p-4 text-sm text-gray-200">
+                <input type="checkbox" checked={userEditForm.isVerified} onChange={e => setUserEditForm({ ...userEditForm, isVerified: e.target.checked })} className="accent-violet-500" /> Verified account
+              </label>
+              <label className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.03] p-4 text-sm text-gray-200">
+                <input type="checkbox" checked={userEditForm.canDownload} onChange={e => setUserEditForm({ ...userEditForm, canDownload: e.target.checked })} className="accent-violet-500" /> Allow downloads
+              </label>
+            </div>
+            <div className="flex flex-col-reverse sm:flex-row gap-3 pt-2">
+              <button type="button" disabled={isSavingUser} onClick={() => setEditingUser(null)} className="flex-1 rounded-xl border border-white/10 px-5 py-3 text-sm font-bold text-gray-300 hover:bg-white/5 disabled:opacity-50">Cancel</button>
+              <button type="submit" disabled={isSavingUser} className="flex-1 rounded-xl bg-violet-600 px-5 py-3 text-sm font-black text-white hover:bg-violet-500 disabled:opacity-50">{isSavingUser ? 'Saving to database…' : 'Save account changes'}</button>
+            </div>
           </form>
         </div>
       )}

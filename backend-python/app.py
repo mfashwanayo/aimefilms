@@ -596,6 +596,66 @@ def toggle_block(email: str, request: Request) -> dict[str, Any]:
     return {"success": True, "isBlocked": blocked}
 
 
+@app.put("/api/admin/users/{email}")
+async def update_admin_user(email: str, request: Request) -> dict[str, Any]:
+    """Update safe account metadata; credentials and roles remain server-managed."""
+    administrator = admin_user(request)
+    normalized_email = email.strip().lower()
+    body = await json_body(request)
+
+    with db() as connection:
+        target = connection.execute(
+            "SELECT * FROM users WHERE lower(email) = %s",
+            (normalized_email,),
+        ).fetchone()
+        if not target:
+            raise HTTPException(status_code=404, detail="User not found.")
+        if target["role"] == "admin":
+            raise HTTPException(status_code=403, detail="Administrator accounts are protected from edits in the user registry.")
+
+        updates: dict[str, Any] = {}
+        if "name" in body:
+            name = body["name"]
+            if not isinstance(name, str) or not name.strip() or len(name.strip()) > 120:
+                raise HTTPException(status_code=422, detail="Name must contain 1 to 120 characters.")
+            updates["name"] = name.strip()
+
+        if "avatar" in body:
+            avatar = body["avatar"]
+            if avatar is not None and (not isinstance(avatar, str) or len(avatar) > 2_000_000):
+                raise HTTPException(status_code=422, detail="Avatar URL must be text shorter than 2 MB.")
+            updates["avatar"] = avatar
+
+        if "language" in body:
+            language = body["language"]
+            if language not in ("EN", "RW", "FR", "SW", "ZH"):
+                raise HTTPException(status_code=422, detail="Choose a supported account language.")
+            updates["language"] = language
+
+        for public_key, database_key in (("isVerified", "is_verified"), ("canDownload", "can_download")):
+            if public_key in body:
+                flag = body[public_key]
+                if not isinstance(flag, bool):
+                    raise HTTPException(status_code=422, detail=f"{public_key} must be true or false.")
+                updates[database_key] = int(flag)
+
+        if not updates:
+            raise HTTPException(status_code=422, detail="No editable account fields were supplied.")
+
+        assignments = ", ".join(f'"{column}" = %s' for column in updates)
+        connection.execute(
+            f"UPDATE users SET {assignments} WHERE email = %s",
+            tuple(updates.values()) + (normalized_email,),
+        )
+        record_log(connection, "USER_UPDATE", f"Updated account settings: {normalized_email}", administrator["email"])
+        updated = connection.execute(
+            "SELECT * FROM users WHERE lower(email) = %s",
+            (normalized_email,),
+        ).fetchone()
+
+    return {"success": True, "user": public_user(updated)}
+
+
 @app.get("/api/admin/logs")
 def get_logs(request: Request) -> dict[str, Any]:
     admin_user(request)
