@@ -14,6 +14,18 @@ interface AuthModalProps {
   brand: Brand;
 }
 
+const publicAccountOnly = (account: User): User => ({
+  name: account.name,
+  email: account.email,
+  role: account.role,
+  avatar: account.avatar,
+  isVerified: account.isVerified,
+  canDownload: account.canDownload,
+  language: account.language,
+  isBlocked: account.isBlocked,
+  joinedAt: account.joinedAt,
+});
+
 const VERIFICATION_EXPIRY_SECONDS = 60;
 
 const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, initialMode, onLogin, language, brand }) => {
@@ -44,51 +56,42 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, initialMode, onL
     if (isOpen) {
       setTimeout(() => firstInputRef.current?.focus(), 500);
       const stored = localStorage.getItem('aimefilms_known_accounts');
-      if (stored) setKnownAccounts(JSON.parse(stored));
+      if (stored) {
+        try {
+          const safeAccounts = (JSON.parse(stored) as User[]).map(publicAccountOnly);
+          setKnownAccounts(safeAccounts);
+          localStorage.setItem('aimefilms_known_accounts', JSON.stringify(safeAccounts));
+        } catch {
+          localStorage.removeItem('aimefilms_known_accounts');
+          setKnownAccounts([]);
+        }
+      }
     }
   }, [initialMode, isOpen]);
 
-  const saveKnownAccount = (user: User, pass?: string) => {
-    const stored = localStorage.getItem('aimefilms_known_accounts');
-    let accounts: (User & { savedPass?: string })[] = stored ? JSON.parse(stored) : [];
-    
-    // Remove if already exists
-    accounts = accounts.filter(a => a.email !== user.email);
-    
-    const accountToSave = { ...user, savedPass: rememberMe ? pass : undefined };
-    accounts.unshift(accountToSave);
-    
+  const saveKnownAccount = (user: User) => {
+    let accounts: User[] = [];
+    try {
+      const stored = localStorage.getItem('aimefilms_known_accounts');
+      accounts = stored ? (JSON.parse(stored) as User[]).map(publicAccountOnly) : [];
+    } catch {
+      accounts = [];
+    }
+    accounts = accounts.filter(account => account.email.toLowerCase() !== user.email.toLowerCase());
+    if (rememberMe) accounts.unshift(publicAccountOnly(user));
     const limited = accounts.slice(0, 3);
     localStorage.setItem('aimefilms_known_accounts', JSON.stringify(limited));
-    setKnownAccounts(limited as User[]);
+    setKnownAccounts(limited);
   };
 
-  const handleQuickLogin = async (account: User & { savedPass?: string }) => {
-    if (account.savedPass) {
-      setIsSubmitting(true);
-      const result = await AimeFilmsAPI.authenticateUser(account.email, account.savedPass);
-      if (result.success && result.user) {
-        saveKnownAccount(result.user, account.savedPass);
-        setIsSuccess(true);
-        setTimeout(() => {
-          onLogin(result.user!);
-          setIsSuccess(false);
-          setIsSubmitting(false);
-          onClose();
-        }, 800);
-      } else {
-        setIdentifier(account.email);
-        setPassword('');
-        setError(t.sessionExpired || "Session expired, please enter password.");
-        setIsSubmitting(false);
-      }
-    } else {
-      setIdentifier(account.email);
-      setTimeout(() => {
-        const pwInput = document.querySelector('input[type="password"]') as HTMLInputElement;
-        pwInput?.focus();
-      }, 100);
-    }
+  const handleQuickLogin = (account: User) => {
+    setIdentifier(account.email);
+    setPassword('');
+    setError(null);
+    setTimeout(() => {
+      const pwInput = document.querySelector('input[type="password"]') as HTMLInputElement;
+      pwInput?.focus();
+    }, 100);
   };
 
   useEffect(() => {
@@ -105,7 +108,7 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, initialMode, onL
     return {
       email: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email),
       id: identifier.trim().length >= 3,
-      password: password.length >= 6,
+      password: password.length >= 12,
       confirm: password === confirmPassword && confirmPassword !== ''
     };
   }, [identifier, email, password, confirmPassword]);
@@ -129,7 +132,7 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, initialMode, onL
     setIsSubmitting(true);
     const result = await AimeFilmsAPI.authenticateUser(identifier, password);
     if (result.success && result.user) {
-      saveKnownAccount(result.user, password);
+      saveKnownAccount(result.user);
       setIsSuccess(true);
       setTimeout(() => {
         onLogin(result.user!);
@@ -232,7 +235,7 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, initialMode, onL
                       className="w-4 h-4 rounded bg-white/5 border-white/10 text-red-600 focus:ring-0"
                     />
                     <label htmlFor="rememberMe" className="text-[10px] font-black text-gray-500 uppercase cursor-pointer select-none">
-                      {language === 'RW' ? 'Nyibuka / Remember Me' : 'Remember Me'}
+                      {language === 'RW' ? 'Bika konti kuri iki gikoresho' : 'Remember account on this device'}
                     </label>
                   </div>
 
@@ -248,8 +251,9 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, initialMode, onL
               <form onSubmit={handleSignup} className="space-y-4">
                 <input type="text" placeholder={t.name} required className={`w-full bg-white/5 text-white px-6 py-4 rounded-xl border border-white/5 ${activeBorder} outline-none font-bold`} value={name} onChange={(e) => setName(e.target.value)} />
                 <input type="email" placeholder={t.email} required className={`w-full bg-white/5 text-white px-6 py-4 rounded-xl border border-white/5 ${activeBorder} outline-none font-bold`} value={email} onChange={(e) => setEmail(e.target.value)} />
-                <input type="password" placeholder={t.passkey} required className={`w-full bg-white/5 text-white px-6 py-4 rounded-xl border border-white/5 ${activeBorder} outline-none font-bold`} value={password} onChange={(e) => setPassword(e.target.value)} />
-                <input type="password" placeholder={t.confirm} required className={`w-full bg-white/5 text-white px-6 py-4 rounded-xl border border-white/5 ${activeBorder} outline-none font-bold`} value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} />
+                <p className="text-xs leading-relaxed text-gray-400">Use at least 12 characters for your password. / Koresha inyuguti nibura 12.</p>
+                <input type="password" minLength={12} autoComplete="new-password" placeholder={t.passkey} required className={`w-full bg-white/5 text-white px-6 py-4 rounded-xl border border-white/5 ${activeBorder} outline-none font-bold`} value={password} onChange={(e) => setPassword(e.target.value)} />
+                <input type="password" minLength={12} autoComplete="new-password" placeholder={t.confirm} required className={`w-full bg-white/5 text-white px-6 py-4 rounded-xl border border-white/5 ${activeBorder} outline-none font-bold`} value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} />
                 <button type="submit" disabled={isSubmitting} className={`w-full py-4 ${activeBg} text-white rounded-2xl font-black text-xs uppercase active:scale-95`}>
                   {isSubmitting ? tc.loading : t.create}
                 </button>
