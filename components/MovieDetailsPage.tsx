@@ -79,7 +79,7 @@ const MovieDetailsPage: React.FC<MovieDetailsPageProps> = ({
   return (
     <main id="main-content" className="min-h-screen bg-[#000000] animate-in fade-in duration-500">
       <div role="img" aria-label={`Hero background for ${movie.name}`} className="relative h-[70vh] w-full overflow-hidden">
-        <img src={movie.imageUrl} className="w-full h-full object-cover transition-transform duration-[10s] scale-105" alt="" />
+        <img src={movie.landscapeImageUrl || movie.imageUrl} className="w-full h-full object-cover transition-transform duration-[10s] scale-105" alt="" />
         <div className="absolute inset-0 bg-gradient-to-t from-[#000000] via-[#000000]/60 to-transparent" />
         <button onClick={onBack} className="absolute top-8 left-8 md:left-16 z-30 bg-black/40 backdrop-blur-md text-white p-3 rounded-full hover:bg-red-600 transition-all border border-white/10 group">
           <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="group-hover:-translate-x-1 transition-transform"><path d="m15 18-6-6 6-6"/></svg>

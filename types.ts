@@ -52,6 +52,13 @@ export interface LogEntry {
 
 export type Brand = 'aimefilms' | 'filmsnyarwanda' | 'princefilms';
 
+export interface MediaTrack {
+  language: string;
+  url: string;
+  fileName: string;
+  path?: string;
+}
+
 export interface StreamingService {
   id: string;
   name: string;
@@ -77,6 +84,17 @@ export interface StreamingService {
   genre: string[];
   matchScore: number;
   price?: string;
+  tmdbId?: string;
+  version?: string;
+  subcategory?: string;
+  previewText?: string;
+  landscapeImageUrl?: string;
+  director?: string;
+  producer?: string;
+  languages?: string[];
+  tags?: string[];
+  subtitleTracks?: MediaTrack[];
+  audioTracks?: MediaTrack[];
 }
 
 export interface ChatMessage {

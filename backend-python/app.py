@@ -40,6 +40,7 @@ SUPABASE_URL = os.getenv("SUPABASE_URL", "").strip().rstrip("/")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
 SUPABASE_PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY", "").strip()
 SUPABASE_VIDEO_BUCKET = os.getenv("SUPABASE_VIDEO_BUCKET", "aimefilms-videos").strip()
+TMDB_API_KEY = os.getenv("TMDB_API_KEY", "").strip()
 try:
     MAX_VIDEO_UPLOAD_MB = max(1, int(os.getenv("MAX_VIDEO_UPLOAD_MB", "3900")))
 except ValueError:
@@ -108,9 +109,11 @@ MOVIE_FIELDS = [
     "id", "name", "brand", "category", "section", "is_hidden", "description",
     "highlights", "pros", "image_url", "logo_url", "link", "video_url",
     "full_movie_url", "rating", "year", "duration", "cast", "synopsis",
-    "is_trending", "is_new", "genre", "match_score", "price",
+    "is_trending", "is_new", "genre", "match_score", "price", "tmdb_id", "version",
+    "subcategory", "preview_text", "landscape_image_url", "director", "producer",
+    "languages", "tags", "subtitle_tracks", "audio_tracks",
 ]
-JSON_FIELDS = {"highlights", "pros", "cast", "genre"}
+JSON_FIELDS = {"highlights", "pros", "cast", "genre", "languages", "tags", "subtitle_tracks", "audio_tracks"}
 BOOLEAN_FIELDS = {"is_hidden", "is_trending", "is_new"}
 MOVIE_DEFAULTS: dict[str, Any] = {
     "name": "Untitled movie", "brand": "aimefilms", "category": "General Entertainment",
@@ -118,7 +121,9 @@ MOVIE_DEFAULTS: dict[str, Any] = {
     "pros": [], "image_url": "", "logo_url": "", "link": "", "video_url": "",
     "full_movie_url": "", "rating": "0", "year": "", "duration": "", "cast": [],
     "synopsis": "", "is_trending": False, "is_new": False, "genre": [],
-    "match_score": 0, "price": None,
+    "match_score": 0, "price": None, "tmdb_id": "", "version": "", "subcategory": "",
+    "preview_text": "", "landscape_image_url": "", "director": "", "producer": "",
+    "languages": [], "tags": [], "subtitle_tracks": [], "audio_tracks": [],
 }
 
 
@@ -192,9 +197,24 @@ def init_db() -> None:
             full_movie_url TEXT NOT NULL DEFAULT '', rating TEXT NOT NULL DEFAULT '0', year TEXT NOT NULL DEFAULT '',
             duration TEXT NOT NULL DEFAULT '', "cast" TEXT NOT NULL DEFAULT '[]', synopsis TEXT NOT NULL DEFAULT '',
             is_trending SMALLINT NOT NULL DEFAULT 0, is_new SMALLINT NOT NULL DEFAULT 0,
-            genre TEXT NOT NULL DEFAULT '[]', match_score DOUBLE PRECISION NOT NULL DEFAULT 0, price TEXT
+            genre TEXT NOT NULL DEFAULT '[]', match_score DOUBLE PRECISION NOT NULL DEFAULT 0, price TEXT,
+            tmdb_id TEXT NOT NULL DEFAULT '', version TEXT NOT NULL DEFAULT '', subcategory TEXT NOT NULL DEFAULT '',
+            preview_text TEXT NOT NULL DEFAULT '', landscape_image_url TEXT NOT NULL DEFAULT '',
+            director TEXT NOT NULL DEFAULT '', producer TEXT NOT NULL DEFAULT '', languages TEXT NOT NULL DEFAULT '[]',
+            tags TEXT NOT NULL DEFAULT '[]', subtitle_tracks TEXT NOT NULL DEFAULT '[]', audio_tracks TEXT NOT NULL DEFAULT '[]'
         )""",
         "ALTER TABLE movies ADD COLUMN IF NOT EXISTS ordinal BIGSERIAL",
+        "ALTER TABLE movies ADD COLUMN IF NOT EXISTS tmdb_id TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE movies ADD COLUMN IF NOT EXISTS version TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE movies ADD COLUMN IF NOT EXISTS subcategory TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE movies ADD COLUMN IF NOT EXISTS preview_text TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE movies ADD COLUMN IF NOT EXISTS landscape_image_url TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE movies ADD COLUMN IF NOT EXISTS director TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE movies ADD COLUMN IF NOT EXISTS producer TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE movies ADD COLUMN IF NOT EXISTS languages TEXT NOT NULL DEFAULT '[]'",
+        "ALTER TABLE movies ADD COLUMN IF NOT EXISTS tags TEXT NOT NULL DEFAULT '[]'",
+        "ALTER TABLE movies ADD COLUMN IF NOT EXISTS subtitle_tracks TEXT NOT NULL DEFAULT '[]'",
+        "ALTER TABLE movies ADD COLUMN IF NOT EXISTS audio_tracks TEXT NOT NULL DEFAULT '[]'",
         "CREATE INDEX IF NOT EXISTS movies_ordinal_idx ON movies (ordinal DESC)",
         """CREATE TABLE IF NOT EXISTS views (
             movie_id TEXT PRIMARY KEY, view_count BIGINT NOT NULL DEFAULT 0, updated_at TEXT NOT NULL
@@ -301,6 +321,12 @@ def movie_from_row(row: dict[str, Any]) -> dict[str, Any]:
         "year": value["year"], "duration": value["duration"], "cast": parse_json(value["cast"], []),
         "synopsis": value["synopsis"], "isTrending": bool(value["is_trending"]), "isNew": bool(value["is_new"]),
         "genre": parse_json(value["genre"], []), "matchScore": float(value["match_score"]), "price": value["price"],
+        "tmdbId": value.get("tmdb_id", ""), "version": value.get("version", ""),
+        "subcategory": value.get("subcategory", ""), "previewText": value.get("preview_text", ""),
+        "landscapeImageUrl": value.get("landscape_image_url", ""), "director": value.get("director", ""),
+        "producer": value.get("producer", ""), "languages": parse_json(value.get("languages"), []),
+        "tags": parse_json(value.get("tags"), []), "subtitleTracks": parse_json(value.get("subtitle_tracks"), []),
+        "audioTracks": parse_json(value.get("audio_tracks"), []),
     }
 
 
@@ -309,7 +335,9 @@ def normalize_movie(data: dict[str, Any], movie_id: str | None = None) -> dict[s
     aliases = {
         "imageUrl": "image_url", "logoUrl": "logo_url", "videoUrl": "video_url",
         "fullMovieUrl": "full_movie_url", "isHidden": "is_hidden", "isTrending": "is_trending",
-        "isNew": "is_new", "matchScore": "match_score",
+        "isNew": "is_new", "matchScore": "match_score", "tmdbId": "tmdb_id",
+        "previewText": "preview_text", "landscapeImageUrl": "landscape_image_url",
+        "subtitleTracks": "subtitle_tracks", "audioTracks": "audio_tracks",
     }
     for source, target in aliases.items():
         if source in movie:
@@ -321,9 +349,9 @@ def normalize_movie(data: dict[str, Any], movie_id: str | None = None) -> dict[s
     for field in BOOLEAN_FIELDS:
         movie[field] = bool(movie.get(field))
     # PostgreSQL is stricter than SQLite about values stored in TEXT columns.
-    for field in ("name", "brand", "category", "section", "description",
-                  "image_url", "logo_url", "link", "video_url",
-                  "full_movie_url", "rating", "year", "duration", "synopsis"):
+    for field in ("name", "brand", "category", "section", "description", "image_url", "logo_url",
+                  "link", "video_url", "full_movie_url", "rating", "year", "duration", "synopsis",
+                  "tmdb_id", "version", "subcategory", "preview_text", "landscape_image_url", "director", "producer"):
         if movie.get(field) is None:
             movie[field] = ""
         elif not isinstance(movie[field], str):
@@ -940,6 +968,79 @@ def upload_video(
         response["message"] = "Video uploaded. Save the returned URL in the movie's videoUrl or fullMovieUrl field."
 
     return response
+
+
+@app.get("/api/admin/tmdb/{tmdb_id}")
+def fetch_tmdb_metadata(tmdb_id: str, request: Request) -> dict[str, Any]:
+    """Fetch metadata through TMDB; the API key remains backend-only."""
+    admin_user(request)
+    if not TMDB_API_KEY: raise HTTPException(status_code=503, detail="TMDB import is not configured. Add TMDB_API_KEY to the backend environment and restart the service.")
+    if not tmdb_id.isdigit() or len(tmdb_id) > 12: raise HTTPException(status_code=422, detail="Enter a numeric TMDB movie ID.")
+    params = {"api_key": TMDB_API_KEY, "language": "en-US"}
+    try:
+        response = requests.get(f"https://api.themoviedb.org/3/movie/{tmdb_id}", params=params, timeout=(8, 20))
+        if response.status_code == 404: raise HTTPException(status_code=404, detail="TMDB did not find a movie with that ID.")
+        response.raise_for_status(); movie = response.json()
+        credits_response = requests.get(f"https://api.themoviedb.org/3/movie/{tmdb_id}/credits", params=params, timeout=(8, 20))
+        credits_response.raise_for_status(); credits = credits_response.json()
+    except HTTPException: raise
+    except requests.RequestException: raise HTTPException(status_code=502, detail="TMDB is temporarily unavailable. Try again or enter details manually.")
+    overview = str(movie.get("overview") or ""); release_date = str(movie.get("release_date") or ""); runtime = int(movie.get("runtime") or 0)
+    genres = [str(item.get("name", "")).strip() for item in movie.get("genres", []) if item.get("name")]
+    languages = [str(item.get("english_name") or item.get("name") or "").strip() for item in movie.get("spoken_languages", []) if item.get("english_name") or item.get("name")]
+    companies = [str(item.get("name", "")).strip() for item in movie.get("production_companies", []) if item.get("name")]
+    crew, cast = credits.get("crew", []), credits.get("cast", [])
+    directors = [str(item.get("name", "")).strip() for item in crew if item.get("job") == "Director" and item.get("name")]
+    poster_path, backdrop_path = movie.get("poster_path"), movie.get("backdrop_path")
+    details = {"tmdbId": str(tmdb_id), "name": str(movie.get("title") or movie.get("name") or ""), "description": overview, "previewText": overview[:240], "synopsis": overview,
+        "year": release_date[:4], "duration": f"{runtime // 60}h {runtime % 60}m" if runtime else "", "rating": str(round(float(movie.get("vote_average") or 0), 1)),
+        "genre": genres, "tags": genres, "subcategory": genres[0] if genres else "", "languages": languages,
+        "imageUrl": f"https://image.tmdb.org/t/p/w500{poster_path}" if poster_path else "", "landscapeImageUrl": f"https://image.tmdb.org/t/p/w1280{backdrop_path}" if backdrop_path else "",
+        "director": ", ".join(directors), "producer": ", ".join(companies[:4]), "cast": [str(item.get("name", "")).strip() for item in cast[:12] if item.get("name")]}
+    return {"success": True, "movie": details}
+
+
+@app.post("/api/admin/media-assets/upload")
+def upload_media_asset(request: Request, file: UploadFile = File(...), movie_id: str = Form(...), kind: str = Form(...), language: str = Form(default="English")) -> dict[str, Any]:
+    """Upload and persist a subtitle or alternate-audio file."""
+    user = admin_user(request)
+    if kind not in ("subtitle", "audio"): raise HTTPException(status_code=422, detail="kind must be subtitle or audio.")
+    if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY: raise HTTPException(status_code=503, detail="Media storage is not configured on the backend.")
+    movie_id = movie_id.strip()
+    if not movie_id or len(movie_id) > 128: raise HTTPException(status_code=422, detail="A valid movie_id is required.")
+    original_name = Path(file.filename or "").name; extension = Path(original_name).suffix.lower()
+    subtitle_types = {".srt": "text/plain", ".vtt": "text/vtt"}
+    audio_types = {".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".aac": "audio/aac", ".ogg": "audio/ogg", ".wav": "audio/wav", ".flac": "audio/flac"}
+    allowed_types = subtitle_types if kind == "subtitle" else audio_types; content_type = allowed_types.get(extension)
+    if not content_type: raise HTTPException(status_code=415, detail=f"Unsupported {kind} format. Supported files: {', '.join(sorted(allowed_types))}.")
+    try: file.file.seek(0, os.SEEK_END); file_size = file.file.tell(); file.file.seek(0)
+    except (OSError, ValueError): raise HTTPException(status_code=400, detail="Unable to read the uploaded file.")
+    if file_size <= 0 or file_size > 200_000_000: raise HTTPException(status_code=413, detail="Subtitle/audio files must be between 1 byte and 200 MB.")
+    with db() as connection: movie_exists = connection.execute("SELECT id FROM movies WHERE id = %s", (movie_id,)).fetchone()
+    if not movie_exists: raise HTTPException(status_code=404, detail="Movie not found. Save its details before uploading media tracks.")
+    safe_movie_id = re.sub(r"[^A-Za-z0-9_-]", "", movie_id)[:80] or "movie"
+    object_path = f"films/{safe_movie_id}/{kind}/{uuid.uuid4().hex}{extension}"
+    bucket_segment, object_segment = quote(SUPABASE_VIDEO_BUCKET, safe=""), quote(object_path, safe="/")
+    upload_url = f"{SUPABASE_URL}/storage/v1/object/{bucket_segment}/{object_segment}"
+    headers = {"apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}", "Content-Type": content_type, "Cache-Control": "3600", "x-upsert": "false"}
+    try: file.file.seek(0); storage_response = requests.post(upload_url, data=file.file, headers=headers, timeout=(15, 180))
+    except requests.RequestException: raise HTTPException(status_code=502, detail="Could not reach Supabase Storage for this media file.")
+    if not storage_response.ok:
+        if storage_response.status_code == 413: raise HTTPException(status_code=413, detail="Supabase Storage rejected the file because of the project's upload limit.")
+        raise HTTPException(status_code=502, detail="Supabase Storage rejected this file. Check the bucket and server-side key settings.")
+    public_url = f"{SUPABASE_URL}/storage/v1/object/public/{bucket_segment}/{object_segment}"
+    if kind == "subtitle" and extension == ".srt":
+        # Browser video players require WebVTT; convert SRT timings before uploading.
+        raise HTTPException(status_code=415, detail="Please convert SRT captions to WebVTT (.vtt) before upload for browser playback.")
+    track = {"language": (language or "English").strip()[:40], "url": public_url, "fileName": original_name, "path": object_path}
+    column = "subtitle_tracks" if kind == "subtitle" else "audio_tracks"
+    with db() as connection:
+        row = connection.execute(f'SELECT "{column}" FROM movies WHERE id = %s', (movie_id,)).fetchone()
+        if not row: raise HTTPException(status_code=404, detail="Movie not found.")
+        tracks = parse_json(row[column], []); tracks.append(track)
+        connection.execute(f'UPDATE movies SET "{column}" = %s WHERE id = %s', (json.dumps(tracks), movie_id))
+        record_log(connection, "MEDIA_UPLOAD", f"Uploaded {kind} track ({language}) for movie {movie_id}", user["email"])
+    return {"success": True, "movieId": movie_id, "kind": kind, "track": track}
 
 
 @app.get("/api/admin/movies")

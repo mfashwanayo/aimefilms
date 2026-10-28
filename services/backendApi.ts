@@ -1,5 +1,5 @@
-import { apiFetch, setAuthToken } from './http';
-import { StreamingService, User, LogEntry, UserMessage } from '../types';
+import { API_BASE_URL, apiFetch, getAuthToken, setAuthToken } from './http';
+import { MediaTrack, StreamingService, User, LogEntry, UserMessage } from '../types';
 
 export type LoginResponse = { success: boolean; token?: string; user?: User; message?: string };
 
@@ -39,6 +39,25 @@ export async function backendTrackView(movieId: string): Promise<void> {
         method: 'POST',
         body: JSON.stringify({ movieId }),
     });
+}
+
+export async function backendFetchTmdbMovie(tmdbId: string): Promise<Partial<StreamingService>> {
+    const res = await apiFetch<{ success: boolean; movie?: Partial<StreamingService>; message?: string }>(`/api/admin/tmdb/${encodeURIComponent(tmdbId)}`, { method: 'GET' });
+    if (!res?.success || !res.movie) throw new Error(res?.message || 'TMDB could not return movie metadata.');
+    return res.movie;
+}
+
+export async function backendUploadMediaAsset(file: File, movieId: string, kind: 'subtitle' | 'audio', language: string): Promise<MediaTrack> {
+    if (!API_BASE_URL && (import.meta as any).env?.PROD) throw new Error('The live backend URL is not configured. Set VITE_API_BASE_URL to the deployed FastAPI service URL.');
+    const token = getAuthToken();
+    if (!token) throw new Error('Please sign in as an administrator before uploading subtitle or audio files.');
+    const form = new FormData(); form.append('file', file, file.name); form.append('movie_id', movieId); form.append('kind', kind); form.append('language', language);
+    const base = API_BASE_URL || 'http://localhost:8001';
+    const response = await fetch(`${base}/api/admin/media-assets/upload`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: form });
+    const responseText = await response.text(); let body: any = {};
+    try { body = responseText ? JSON.parse(responseText) : {}; } catch { /* use readable HTTP fallback */ }
+    if (!response.ok || !body?.success || !body?.track) throw new Error(body?.message || body?.detail || `Media upload failed (HTTP ${response.status}).`);
+    return body.track as MediaTrack;
 }
 
 export async function backendAdminAddMovie(movie: Partial<StreamingService>): Promise<{ success: boolean; movie: StreamingService }> {

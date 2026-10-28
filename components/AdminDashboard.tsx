@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { AimeFilmsAPI } from '../services/api';
-import { backendUploadVideo } from '../services/backendApi';
+import { backendFetchTmdbMovie, backendUploadMediaAsset, backendUploadVideo } from '../services/backendApi';
 import { StreamingService, User, LogEntry, UserMessage, Brand, Language } from '../types';
 import Logo from './Logo';
 
@@ -33,6 +33,12 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
   const [isSavingMovie, setIsSavingMovie] = useState(false);
   const [pendingVideoMovieId, setPendingVideoMovieId] = useState<string | null>(null);
   const [uploadedVideoFields, setUploadedVideoFields] = useState<string[]>([]);
+  const [tmdbIdInput, setTmdbIdInput] = useState('');
+  const [isFetchingTmdb, setIsFetchingTmdb] = useState(false);
+  const [subtitleLanguage, setSubtitleLanguage] = useState('English');
+  const [audioLanguage, setAudioLanguage] = useState('English');
+  const [selectedSubtitleFiles, setSelectedSubtitleFiles] = useState<Array<{ file: File; language: string }>>([]);
+  const [selectedAudioFiles, setSelectedAudioFiles] = useState<Array<{ file: File; language: string }>>([]);
   
   const brandColors = {
     aimefilms: { bg: 'bg-red-600', shadow: 'shadow-red-600/20', text: 'text-red-600' },
@@ -64,7 +70,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
     imageUrl: '',
     videoUrl: '',
     fullMovieUrl: '',
-    rating: '8.0',
+    rating: '8.0', tmdbId: '', version: 'HD', subcategory: '', previewText: '', landscapeImageUrl: '', director: '', producer: '',
+    languages: ['Kinyarwanda'], tags: [], subtitleTracks: [], audioTracks: [],
     year: '2024',
     duration: '1h 30m',
     genre: ['Action'],
@@ -122,16 +129,20 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
     setUploadedVideoFields([]);
     setPendingVideoMovieId(null);
     setUploadStatus('');
+    setTmdbIdInput('');
+    setSelectedSubtitleFiles([]);
+    setSelectedAudioFiles([]);
     setNewMovie({
       name: '',
       brand,
       section: 'kinyarwanda',
       category: 'General Entertainment',
       description: '',
-      imageUrl: '',
+      imageUrl: '', landscapeImageUrl: '',
       videoUrl: '',
       fullMovieUrl: '',
-      rating: '8.0',
+      rating: '8.0', tmdbId: '', version: 'HD', subcategory: '', previewText: '', director: '', producer: '',
+      languages: ['Kinyarwanda'], tags: [], subtitleTracks: [], audioTracks: [],
       year: String(new Date().getFullYear()),
       duration: '1h 30m',
       genre: ['Action'],
@@ -154,6 +165,9 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
     setVideoProgress({});
     setUploadedVideoFields([]);
     setUploadStatus('');
+    setTmdbIdInput(movie.tmdbId || '');
+    setSelectedSubtitleFiles([]);
+    setSelectedAudioFiles([]);
     setNewMovie({
       ...movie,
       genre: [...(movie.genre || [])],
@@ -165,63 +179,48 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
   };
 
   const handleAddMovie = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsSavingMovie(true);
-    setUploadStatus('');
-    setAdminError('');
+    e.preventDefault(); setIsSavingMovie(true); setUploadStatus(''); setAdminError('');
     try {
-      const videoEntries = (Object.entries(selectedVideoFiles) as Array<['videoUrl' | 'fullMovieUrl', File]>)
-        .filter(([, file]) => Boolean(file));
+      const videoEntries = (Object.entries(selectedVideoFiles) as Array<['videoUrl' | 'fullMovieUrl', File]>).filter(([, file]) => Boolean(file));
       let movieId = editingMovieId || pendingVideoMovieId;
-
-      if (editingMovieId) {
-        // Leave prior URLs in the database until the replacement upload is verified.
+      if (movieId) {
         const metadata: Partial<StreamingService> = { ...newMovie };
         if (selectedVideoFiles.videoUrl) delete metadata.videoUrl;
         if (selectedVideoFiles.fullMovieUrl) delete metadata.fullMovieUrl;
-        await AimeFilmsAPI.updateMovie(editingMovieId, metadata);
-      } else if (videoEntries.length === 0) {
-        await AimeFilmsAPI.addMovie(newMovie as any);
-      } else if (!movieId) {
-        const metadata: Partial<StreamingService> = {
-          ...newMovie,
-          ...(selectedVideoFiles.videoUrl ? { videoUrl: '' } : {}),
-          ...(selectedVideoFiles.fullMovieUrl ? { fullMovieUrl: '' } : {})
-        };
-        const created = await AimeFilmsAPI.addMovie(metadata as any);
-        movieId = created.id;
-        setPendingVideoMovieId(movieId);
+        await AimeFilmsAPI.updateMovie(movieId, metadata);
+      } else {
+        const metadata: Partial<StreamingService> = { ...newMovie, ...(selectedVideoFiles.videoUrl ? { videoUrl: '' } : {}), ...(selectedVideoFiles.fullMovieUrl ? { fullMovieUrl: '' } : {}) };
+        const created = await AimeFilmsAPI.addMovie(metadata as any); movieId = created.id; setPendingVideoMovieId(movieId);
       }
-
       if (videoEntries.length > 0 && movieId) {
         const completed = new Set(uploadedVideoFields);
         for (const [field, file] of videoEntries) {
           if (completed.has(field)) continue;
-          setUploadStatus(`Uploading ${file.name} to Supabase Storage…`);
-          setVideoProgress(prev => ({ ...prev, [field]: 0 }));
-          await backendUploadVideo(file, movieId!, field, percent => {
-            setVideoProgress(prev => ({ ...prev, [field]: percent }));
-          });
-          completed.add(field);
-          setUploadedVideoFields(Array.from(completed));
-          setUploadStatus(`Saved ${field === 'fullMovieUrl' ? 'full movie' : 'trailer'} to Storage and database.`);
+          setUploadStatus(`Uploading ${file.name} to Supabase Storage…`); setVideoProgress(prev => ({ ...prev, [field]: 0 }));
+          await backendUploadVideo(file, movieId, field, percent => setVideoProgress(prev => ({ ...prev, [field]: percent })));
+          completed.add(field); setUploadedVideoFields(Array.from(completed)); setUploadStatus(`Saved ${field === 'fullMovieUrl' ? 'full movie' : 'trailer'} to Storage and database.`);
         }
       }
-
-      setUploadStatus(editingMovieId ? 'Film changes saved to the database.' : 'Film saved successfully.');
-      setIsAddingMovie(false);
-      setEditingMovieId(null);
-      setSelectedVideoFiles({});
-      setVideoProgress({});
-      setPendingVideoMovieId(null);
-      setUploadedVideoFields([]);
-      await loadData();
-      onRefresh();
-    } catch (error) {
-      setUploadStatus(error instanceof Error ? error.message : 'Film changes failed.');
-    } finally {
-      setIsSavingMovie(false);
-    }
+      for (const pending of [...selectedSubtitleFiles]) {
+        if (!movieId) throw new Error('Save the movie details before uploading subtitles.');
+        setUploadStatus(`Uploading ${pending.language} subtitles…`);
+        const track = await backendUploadMediaAsset(pending.file, movieId, 'subtitle', pending.language);
+        setNewMovie(prev => ({ ...prev, subtitleTracks: [...(prev.subtitleTracks || []), track] }));
+        setSelectedSubtitleFiles(prev => prev.filter(item => item !== pending));
+      }
+      for (const pending of [...selectedAudioFiles]) {
+        if (!movieId) throw new Error('Save the movie details before uploading audio.');
+        setUploadStatus(`Uploading ${pending.language} audio…`);
+        const track = await backendUploadMediaAsset(pending.file, movieId, 'audio', pending.language);
+        setNewMovie(prev => ({ ...prev, audioTracks: [...(prev.audioTracks || []), track] }));
+        setSelectedAudioFiles(prev => prev.filter(item => item !== pending));
+      }
+      setUploadStatus(editingMovieId ? 'Film details and media tracks saved to the database.' : 'Film and upload metadata saved successfully.');
+      setIsAddingMovie(false); setEditingMovieId(null); setSelectedVideoFiles({}); setVideoProgress({});
+      setPendingVideoMovieId(null); setUploadedVideoFields([]); setSelectedSubtitleFiles([]); setSelectedAudioFiles([]);
+      await loadData(); onRefresh();
+    } catch (error) { setUploadStatus(error instanceof Error ? error.message : 'Film changes failed.'); }
+    finally { setIsSavingMovie(false); }
   };
 
   const handleDeleteMovie = async (movie: StreamingService) => {
@@ -297,15 +296,36 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
     }
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>, field: 'imageUrl') => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setNewMovie(prev => ({ ...prev, [field]: reader.result as string }));
-      };
-      reader.readAsDataURL(file);
-    }
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>, field: 'imageUrl' | 'landscapeImageUrl') => {
+    const file = e.target.files?.[0]; e.target.value = ''; if (!file) return;
+    if (!file.type.startsWith('image/')) { setUploadStatus('Choose a valid image file.'); return; }
+    if (file.size > 5 * 1024 * 1024) { setUploadStatus('Each poster image must be 5 MB or smaller.'); return; }
+    const reader = new FileReader(); reader.onloadend = () => setNewMovie(prev => ({ ...prev, [field]: reader.result as string }));
+    reader.onerror = () => setUploadStatus('The image could not be read. Please try another file.'); reader.readAsDataURL(file);
+  };
+
+  const handleMediaFileChange = (e: React.ChangeEvent<HTMLInputElement>, kind: 'subtitle' | 'audio') => {
+    const file = e.target.files?.[0]; e.target.value = ''; if (!file) return;
+    const extension = file.name.split('.').pop()?.toLowerCase() || '';
+    const allowed = kind === 'subtitle' ? ['vtt'] : ['mp3', 'm4a', 'aac', 'ogg', 'wav', 'flac'];
+    if (!allowed.includes(extension)) { setUploadStatus(`Unsupported ${kind} format. Allowed: ${allowed.join(', ')}.`); return; }
+    if (file.size <= 0 || file.size > 200 * 1024 * 1024) { setUploadStatus('Subtitle and audio files must be smaller than 200 MB.'); return; }
+    if (kind === 'subtitle') setSelectedSubtitleFiles(prev => [...prev, { file, language: subtitleLanguage }]); else setSelectedAudioFiles(prev => [...prev, { file, language: audioLanguage }]);
+    setUploadStatus('');
+  };
+
+  const handleFetchTmdb = async () => {
+    if (!tmdbIdInput.trim()) { setUploadStatus('Enter the numeric TMDB movie ID first.'); return; }
+    setIsFetchingTmdb(true); setUploadStatus('Fetching movie metadata from TMDB…');
+    try {
+      const imported = await backendFetchTmdbMovie(tmdbIdInput.trim());
+      setNewMovie(prev => ({ ...prev, ...imported, tmdbId: String(imported.tmdbId || tmdbIdInput.trim()), brand: prev.brand || brand,
+        section: prev.section || 'english', highlights: prev.highlights || [], pros: prev.pros || [], isTrending: prev.isTrending || false,
+        isNew: prev.isNew ?? true, isHidden: prev.isHidden ?? false, matchScore: prev.matchScore ?? 90,
+        subtitleTracks: prev.subtitleTracks || [], audioTracks: prev.audioTracks || [], }));
+      setUploadStatus(`Imported metadata for “${imported.name || 'movie'}”. Review the fields before saving.`);
+    } catch (error) { setUploadStatus(error instanceof Error ? error.message : 'TMDB metadata import failed.'); }
+    finally { setIsFetchingTmdb(false); }
   };
 
   const handleVideoFileChange = (
@@ -753,7 +773,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
       {isAddingMovie && (
         <div className="fixed inset-0 z-[1100] flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/95 backdrop-blur-xl" onClick={() => { if (!isSavingMovie) setIsAddingMovie(false); }} />
-          <form onSubmit={handleAddMovie} className="relative bg-[#0c0c0c] w-full max-w-2xl p-10 rounded-[3rem] border border-white/10 shadow-2xl space-y-6 max-h-[90vh] overflow-y-auto no-scrollbar">
+          <form onSubmit={handleAddMovie} className="relative bg-[#0c0c0c] w-full max-w-6xl p-6 md:p-8 rounded-[2rem] border border-white/10 shadow-2xl space-y-6 max-h-[94vh] overflow-y-auto no-scrollbar">
             <div className="flex items-start justify-between gap-4">
               <div>
                 <h3 className="text-3xl font-black italic uppercase tracking-tighter">{editingMovieId ? 'Edit Film Details' : 'Upload New Content'}</h3>
@@ -762,7 +782,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
               <button type="button" onClick={() => { if (!isSavingMovie) { setIsAddingMovie(false); setEditingMovieId(null); } }} aria-label="Close film editor" className="text-xl text-gray-400 hover:text-white">×</button>
             </div>
             
-            <div className="grid grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3 rounded-2xl border border-white/10 bg-white/[0.03] p-4"><div className="space-y-2"><label className="text-[10px] font-black uppercase tracking-widest text-gray-400">TMDB Movie ID (optional)</label><input value={tmdbIdInput} onChange={e => { setTmdbIdInput(e.target.value); setNewMovie(prev => ({ ...prev, tmdbId: e.target.value })); }} placeholder="e.g. 603" inputMode="numeric" className="w-full bg-white/5 border border-white/10 p-3 rounded-xl outline-none focus:border-violet-500" /></div><div className="flex items-end"><button type="button" onClick={handleFetchTmdb} disabled={isFetchingTmdb} className="w-full md:w-auto rounded-xl bg-violet-600 hover:bg-violet-500 disabled:opacity-50 px-6 py-3 text-xs font-black uppercase tracking-wider">{isFetchingTmdb ? 'Fetching…' : '↻ Fetch TMDB'}</button></div></div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="space-y-2">
                 <label className="text-[10px] font-black uppercase tracking-widest text-gray-500">Film Title</label>
                 <input required value={newMovie.name} onChange={e => setNewMovie({...newMovie, name: e.target.value})} className={`w-full bg-white/5 border border-white/10 p-4 rounded-2xl outline-none focus:border-${currentBrand.text.replace('text-', '')}`} />
@@ -777,8 +798,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-6">
-              <div className="space-y-2">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4"><div className="space-y-2"><label className="text-[10px] font-black uppercase tracking-widest text-gray-500">Version / Quality</label><select value={newMovie.version || ''} onChange={e => setNewMovie({...newMovie, version: e.target.value})} className="w-full bg-white/5 border border-white/10 p-3 rounded-xl outline-none focus:border-violet-500"><option value="">Select version</option><option>CAM</option><option>480p</option><option>720p</option><option>1080p</option><option>4K</option><option>Director’s Cut</option></select></div><div className="space-y-2"><label className="text-[10px] font-black uppercase tracking-widest text-gray-500">Subcategory</label><input value={newMovie.subcategory || ''} onChange={e => setNewMovie({...newMovie, subcategory: e.target.value})} placeholder="e.g. Action thriller" className="w-full bg-white/5 border border-white/10 p-3 rounded-xl outline-none focus:border-violet-500" /></div><div className="space-y-2">
                 <label className="text-[10px] font-black uppercase tracking-widest text-gray-500">Section</label>
                 <select value={newMovie.section} onChange={e => setNewMovie({...newMovie, section: e.target.value as any})} className={`w-full bg-white/5 border border-white/10 p-4 rounded-2xl outline-none focus:border-${currentBrand.text.replace('text-', '')}`}>
                   <option value="kinyarwanda">Films in Kinyarwanda</option>
@@ -807,21 +827,10 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
               </div>
             </div>
 
-            <div className="space-y-2">
-              <label className="text-[10px] font-black uppercase tracking-widest text-gray-500">Short description</label>
-              <textarea value={newMovie.description || ''} onChange={e => setNewMovie({...newMovie, description: e.target.value})} rows={2} className="w-full bg-white/5 border border-white/10 p-4 rounded-2xl outline-none focus:border-purple-500 resize-none" />
-            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4"><div className="space-y-2"><label className="text-[10px] font-black uppercase tracking-widest text-gray-500">Preview Text</label><textarea value={newMovie.previewText || ''} onChange={e => setNewMovie({...newMovie, previewText: e.target.value})} rows={3} placeholder="Short text shown in film cards" className="w-full bg-white/5 border border-white/10 p-4 rounded-2xl outline-none focus:border-violet-500 resize-none" /></div><div className="space-y-2"><label className="text-[10px] font-black uppercase tracking-widest text-gray-500">Description</label><textarea value={newMovie.description || ''} onChange={e => setNewMovie({...newMovie, description: e.target.value})} rows={3} placeholder="A full description of the film" className="w-full bg-white/5 border border-white/10 p-4 rounded-2xl outline-none focus:border-violet-500 resize-none" /></div></div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4"><div className="space-y-2"><label className="text-[10px] font-black uppercase tracking-widest text-gray-500">Director</label><input value={newMovie.director || ''} onChange={e => setNewMovie({...newMovie, director: e.target.value})} placeholder="Director name" className="w-full bg-white/5 border border-white/10 p-3 rounded-xl outline-none focus:border-violet-500" /></div><div className="space-y-2"><label className="text-[10px] font-black uppercase tracking-widest text-gray-500">Producer / Production</label><input value={newMovie.producer || ''} onChange={e => setNewMovie({...newMovie, producer: e.target.value})} placeholder="Producer or studio" className="w-full bg-white/5 border border-white/10 p-3 rounded-xl outline-none focus:border-violet-500" /></div><div className="space-y-2"><label className="text-[10px] font-black uppercase tracking-widest text-gray-500">Ratings (max 10)</label><input type="number" min="0" max="10" step="0.1" value={newMovie.rating || ''} onChange={e => setNewMovie({...newMovie, rating: String(Math.max(0, Math.min(10, Number(e.target.value) || 0)))})} className="w-full bg-white/5 border border-white/10 p-3 rounded-xl outline-none focus:border-violet-500" /></div></div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <label className="text-[10px] font-black uppercase tracking-widest text-gray-500">Genres (comma separated)</label>
-                <input value={(newMovie.genre || []).join(', ')} onChange={e => setNewMovie({...newMovie, genre: e.target.value.split(',').map(value => value.trim()).filter(Boolean)})} placeholder="Action, Drama" className="w-full bg-white/5 border border-white/10 p-4 rounded-2xl outline-none focus:border-purple-500" />
-              </div>
-              <div className="space-y-2">
-                <label className="text-[10px] font-black uppercase tracking-widest text-gray-500">Cast (comma separated)</label>
-                <input value={(newMovie.cast || []).join(', ')} onChange={e => setNewMovie({...newMovie, cast: e.target.value.split(',').map(value => value.trim()).filter(Boolean)})} placeholder="Actor 1, Actor 2" className="w-full bg-white/5 border border-white/10 p-4 rounded-2xl outline-none focus:border-purple-500" />
-              </div>
-            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4"><div className="space-y-2"><label className="text-[10px] font-black uppercase tracking-widest text-gray-500">Genres (comma separated)</label><input value={(newMovie.genre || []).join(', ')} onChange={e => setNewMovie({...newMovie, genre: e.target.value.split(',').map(value => value.trim()).filter(Boolean)})} placeholder="Action, Drama" className="w-full bg-white/5 border border-white/10 p-4 rounded-2xl outline-none focus:border-violet-500" /></div><div className="space-y-2"><label className="text-[10px] font-black uppercase tracking-widest text-gray-500">Languages (comma separated)</label><input value={(newMovie.languages || []).join(', ')} onChange={e => setNewMovie({...newMovie, languages: e.target.value.split(',').map(value => value.trim()).filter(Boolean)})} placeholder="Kinyarwanda, English" className="w-full bg-white/5 border border-white/10 p-4 rounded-2xl outline-none focus:border-violet-500" /></div><div className="space-y-2"><label className="text-[10px] font-black uppercase tracking-widest text-gray-500">Cast (comma separated)</label><input value={(newMovie.cast || []).join(', ')} onChange={e => setNewMovie({...newMovie, cast: e.target.value.split(',').map(value => value.trim()).filter(Boolean)})} placeholder="Actor 1, Actor 2" className="w-full bg-white/5 border border-white/10 p-4 rounded-2xl outline-none focus:border-violet-500" /></div><div className="space-y-2"><label className="text-[10px] font-black uppercase tracking-widest text-gray-500">Tags (comma separated)</label><input value={(newMovie.tags || []).join(', ')} onChange={e => setNewMovie({...newMovie, tags: e.target.value.split(',').map(value => value.trim()).filter(Boolean)})} placeholder="New release, Family, Award winning" className="w-full bg-white/5 border border-white/10 p-4 rounded-2xl outline-none focus:border-violet-500" /></div></div>
 
             <div className="flex flex-wrap gap-6">
               <label className="flex items-center gap-3 text-xs font-bold text-gray-300">
@@ -834,17 +843,9 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
               </label>
             </div>
 
-            <div className="space-y-2">
-              <label className="text-[10px] font-black uppercase tracking-widest text-gray-500">Image (Poster)</label>
-              <div className="flex gap-4">
-                <input value={newMovie.imageUrl || ''} onChange={e => setNewMovie({...newMovie, imageUrl: e.target.value})} placeholder="Poster URL or choose a local image" className="flex-1 bg-white/5 border border-white/10 p-4 rounded-2xl outline-none focus:border-red-600" />
-                <label className="bg-white/10 hover:bg-white/20 p-4 rounded-2xl cursor-pointer transition-all">
-                  📁
-                  <input type="file" accept="image/*" className="hidden" onChange={e => handleFileChange(e, 'imageUrl')} />
-                </label>
-              </div>
-            </div>
+            <div className="grid grid-cols-1 md:grid-cols-[0.9fr_1.8fr] gap-5"><div className="space-y-2"><label className="text-xs font-bold text-gray-300">Portrait Image / Poster</label><div className="h-48 overflow-hidden rounded-xl border border-white/15 bg-[#676b70] flex items-center justify-center">{newMovie.imageUrl ? <img src={newMovie.imageUrl} alt="Portrait poster preview" className="h-full w-full object-cover" /> : <div className="text-4xl text-white/40">▧</div>}</div><input value={newMovie.imageUrl || ''} onChange={e => setNewMovie({...newMovie, imageUrl: e.target.value})} placeholder="Paste portrait poster URL" className="w-full bg-white/5 border border-white/10 p-3 rounded-xl outline-none focus:border-violet-500" /><label className="inline-flex items-center gap-2 rounded-xl bg-violet-600 hover:bg-violet-500 px-4 py-2 text-xs font-bold cursor-pointer">↑ Upload portrait image<input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={e => handleFileChange(e, 'imageUrl')} /></label><p className="text-[10px] text-gray-500">PNG, JPG, WEBP · up to 5 MB</p></div><div className="space-y-2"><label className="text-xs font-bold text-gray-300">Landscape Image / Banner</label><div className="h-48 overflow-hidden rounded-xl border border-white/15 bg-[#676b70] flex items-center justify-center">{newMovie.landscapeImageUrl ? <img src={newMovie.landscapeImageUrl} alt="Landscape banner preview" className="h-full w-full object-cover" /> : <div className="text-4xl text-white/40">▱</div>}</div><input value={newMovie.landscapeImageUrl || ''} onChange={e => setNewMovie({...newMovie, landscapeImageUrl: e.target.value})} placeholder="Paste landscape banner URL" className="w-full bg-white/5 border border-white/10 p-3 rounded-xl outline-none focus:border-violet-500" /><label className="inline-flex items-center gap-2 rounded-xl bg-violet-600 hover:bg-violet-500 px-4 py-2 text-xs font-bold cursor-pointer">↑ Upload landscape image<input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={e => handleFileChange(e, 'landscapeImageUrl')} /></label><p className="text-[10px] text-gray-500">PNG, JPG, WEBP · up to 5 MB</p></div></div>
 
+            <section className="space-y-5 rounded-2xl border border-white/10 bg-white/[0.03] p-5"><div><h4 className="text-sm font-black uppercase tracking-wider text-white">Subtitles & alternate audio</h4><p className="mt-1 text-xs text-gray-400">Choose language and file, then save. Media is stored in Supabase and attached to the movie.</p></div><div className="grid grid-cols-1 md:grid-cols-2 gap-5"><div className="space-y-3 rounded-xl border border-white/10 p-4"><label className="block text-xs font-bold text-gray-300">Subtitle track</label><select value={subtitleLanguage} onChange={e => setSubtitleLanguage(e.target.value)} className="w-full bg-white/5 border border-white/10 p-3 rounded-xl text-sm"><option>English</option><option>Kinyarwanda</option><option>French</option><option>Swahili</option><option>Portuguese</option><option>Arabic</option><option>Spanish</option><option>Other</option></select><label className="flex cursor-pointer items-center justify-center rounded-xl border border-dashed border-violet-400/50 bg-violet-500/10 p-4 text-xs font-bold hover:bg-violet-500/20">↑ Choose WebVTT subtitle file (.vtt)<input type="file" accept=".vtt" className="hidden" onChange={e => handleMediaFileChange(e, 'subtitle')} /></label>{(newMovie.subtitleTracks || []).map((track,index)=><div key={`sub-${track.url}-${index}`} className="flex items-center gap-2 rounded-lg bg-white/5 p-2 text-xs"><span className="min-w-0 flex-1 truncate">{track.language} · {track.fileName || 'Subtitle file'}</span><button type="button" onClick={() => setNewMovie(prev => ({...prev, subtitleTracks: (prev.subtitleTracks || []).filter((_,i)=>i!==index)}))} className="text-red-300">Remove</button></div>)}{selectedSubtitleFiles.map((item,index)=><div key={`pending-sub-${item.file.name}-${index}`} className="flex items-center gap-2 rounded-lg border border-violet-400/20 bg-violet-500/5 p-2 text-xs"><span className="min-w-0 flex-1 truncate">Pending · {item.language} · {item.file.name}</span><button type="button" onClick={() => setSelectedSubtitleFiles(prev=>prev.filter(entry=>entry!==item))} className="text-red-300">×</button></div>)}</div><div className="space-y-3 rounded-xl border border-white/10 p-4"><label className="block text-xs font-bold text-gray-300">Alternate audio track</label><select value={audioLanguage} onChange={e => setAudioLanguage(e.target.value)} className="w-full bg-white/5 border border-white/10 p-3 rounded-xl text-sm"><option>English</option><option>Kinyarwanda</option><option>French</option><option>Swahili</option><option>Portuguese</option><option>Arabic</option><option>Spanish</option><option>Other</option></select><label className="flex cursor-pointer items-center justify-center rounded-xl border border-dashed border-violet-400/50 bg-violet-500/10 p-4 text-xs font-bold hover:bg-violet-500/20">↑ Choose audio file<input type="file" accept=".mp3,.m4a,.aac,.ogg,.wav,.flac" className="hidden" onChange={e => handleMediaFileChange(e, 'audio')} /></label>{(newMovie.audioTracks || []).map((track,index)=><div key={`audio-${track.url}-${index}`} className="flex items-center gap-2 rounded-lg bg-white/5 p-2 text-xs"><span className="min-w-0 flex-1 truncate">{track.language} · {track.fileName || 'Audio file'}</span><button type="button" onClick={() => setNewMovie(prev => ({...prev, audioTracks: (prev.audioTracks || []).filter((_,i)=>i!==index)}))} className="text-red-300">Remove</button></div>)}{selectedAudioFiles.map((item,index)=><div key={`pending-audio-${item.file.name}-${index}`} className="flex items-center gap-2 rounded-lg border border-violet-400/20 bg-violet-500/5 p-2 text-xs"><span className="min-w-0 flex-1 truncate">Pending · {item.language} · {item.file.name}</span><button type="button" onClick={() => setSelectedAudioFiles(prev=>prev.filter(entry=>entry!==item))} className="text-red-300">×</button></div>)}</div></div></section>
             <div className="space-y-2">
               <label className="text-[10px] font-black uppercase tracking-widest text-gray-500">Video (Trailer)</label>
               <div className="flex gap-4">

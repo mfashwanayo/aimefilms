@@ -1,6 +1,6 @@
 
 import React, { useEffect, useRef, useState } from 'react';
-import { StreamingService } from '../types';
+import { MediaTrack, StreamingService } from '../types';
 import { STREAMING_SERVICES } from '../constants';
 import { AimeFilmsAPI } from '../services/api';
 
@@ -9,11 +9,14 @@ interface VideoPlayerProps {
   title: string;
   onClose: () => void;
   isFullMovie?: boolean;
+  subtitleTracks?: MediaTrack[];
+  audioTracks?: MediaTrack[];
 }
 
-const VideoPlayer: React.FC<VideoPlayerProps> = ({ url, title, onClose, isFullMovie = false }) => {
+const VideoPlayer: React.FC<VideoPlayerProps> = ({ url, title, onClose, isFullMovie = false, subtitleTracks = [], audioTracks = [] }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const previewVideoRef = useRef<HTMLVideoElement>(null);
+  const alternateAudioRef = useRef<HTMLAudioElement>(null);
   const progressBarRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   
@@ -29,6 +32,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ url, title, onClose, isFullMo
   const [isSwitchingQuality, setIsSwitchingQuality] = useState(false);
   const [isFeedbackModalOpen, setIsFeedbackModalOpen] = useState(false);
   const [feedbackText, setFeedbackText] = useState('');
+  const [captionsEnabled, setCaptionsEnabled] = useState(false);
+  const [selectedAudioUrl, setSelectedAudioUrl] = useState('original');
   const [feedbackSent, setFeedbackSent] = useState(false);
 
   const controlsTimeout = useRef<any>(null);
@@ -83,10 +88,28 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ url, title, onClose, isFullMo
 
   const handleTimeUpdate = () => {
     if (videoRef.current) {
-      const p = (videoRef.current.currentTime / videoRef.current.duration) * 100;
-      setProgress(p);
+      const p = (videoRef.current.currentTime / videoRef.current.duration) * 100; setProgress(p);
+      const audio = alternateAudioRef.current;
+      if (audio && selectedAudioUrl !== 'original' && Math.abs(audio.currentTime - videoRef.current.currentTime) > 0.45) audio.currentTime = videoRef.current.currentTime;
     }
   };
+
+  useEffect(() => {
+    const video = videoRef.current; const audio = alternateAudioRef.current; if (!video || !audio) return;
+    if (selectedAudioUrl === 'original') { audio.pause(); video.muted = isMuted; return; }
+    video.muted = true; audio.volume = isMuted ? 0 : volume; audio.currentTime = video.currentTime || 0;
+    const syncPlay = () => { audio.currentTime = video.currentTime || 0; audio.volume = isMuted ? 0 : volume; void audio.play().catch(() => undefined); };
+    const syncPause = () => audio.pause(); video.addEventListener('play', syncPlay); video.addEventListener('pause', syncPause);
+    if (!video.paused) syncPlay();
+    return () => { video.removeEventListener('play', syncPlay); video.removeEventListener('pause', syncPause); audio.pause(); };
+  }, [selectedAudioUrl, url, isMuted, volume, isPlaying]);
+
+  useEffect(() => {
+    const tracks = videoRef.current?.textTracks; if (!tracks) return;
+    for (let index = 0; index < tracks.length; index++) tracks[index].mode = captionsEnabled ? 'showing' : 'disabled';
+  }, [captionsEnabled, subtitleTracks, url]);
+
+  const toggleCaptions = () => setCaptionsEnabled(value => !value);
 
   const formatTime = (seconds: number) => {
     if (isNaN(seconds)) return '00:00:00';
@@ -169,7 +192,10 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ url, title, onClose, isFullMo
           autoPlay
           onTimeUpdate={handleTimeUpdate}
           onClick={togglePlay}
-        />
+        >
+          {subtitleTracks.map((track, index) => <track key={`${track.url}-${index}`} kind="subtitles" src={track.url} srcLang={(track.language || 'en').slice(0, 2).toLowerCase()} label={track.language} />)}
+        </video>
+        <audio ref={alternateAudioRef} src={selectedAudioUrl === 'original' ? undefined : selectedAudioUrl} className="hidden" preload="auto" />
 
         <video ref={previewVideoRef} src={url} muted className="hidden" preload="auto" />
 
@@ -256,7 +282,9 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ url, title, onClose, isFullMo
                 </div>
               </div>
 
-              <div className="flex items-center gap-6 relative">
+              <div className="flex items-center gap-3 md:gap-6 relative">
+                 {subtitleTracks.length > 0 && <button type="button" onClick={toggleCaptions} className={`rounded-md border px-2 py-1 text-[10px] font-black ${captionsEnabled ? 'border-red-500 bg-red-600 text-white' : 'border-white/20 text-white/70 hover:text-white'}`} aria-pressed={captionsEnabled}>CC {captionsEnabled ? 'ON' : 'OFF'}</button>}
+                 {audioTracks.length > 0 && <select aria-label="Audio language" value={selectedAudioUrl} onChange={e => setSelectedAudioUrl(e.target.value)} className="max-w-28 rounded-md border border-white/20 bg-[#141414] px-2 py-1 text-[10px] text-white"><option value="original">Original audio</option>{audioTracks.map((track,index)=><option key={`${track.url}-${index}`} value={track.url}>{track.language}</option>)}</select>}
                  <div className="relative">
                    <button 
                      onClick={() => setIsQualityMenuOpen(!isQualityMenuOpen)}

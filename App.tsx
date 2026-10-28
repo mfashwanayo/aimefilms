@@ -409,7 +409,7 @@ const App: React.FC = () => {
 
 
       {isAdminOpen && isAdmin && <AdminDashboard isOpen={isAdminOpen} onClose={() => setIsAdminOpen(false)} onRefresh={initApp} brand={selectedBrand || 'aimefilms'} />}
-      {playingVideo && <VideoPlayer url={playingVideo.isFull ? playingVideo.service.fullMovieUrl : playingVideo.service.videoUrl} title={playingVideo.service.name} isFullMovie={playingVideo.isFull} onClose={() => setPlayingVideo(null)} />}
+      {playingVideo && <VideoPlayer url={playingVideo.isFull ? playingVideo.service.fullMovieUrl : playingVideo.service.videoUrl} title={playingVideo.service.name} isFullMovie={playingVideo.isFull} subtitleTracks={playingVideo.service.subtitleTracks || []} audioTracks={playingVideo.service.audioTracks || []} onClose={() => setPlayingVideo(null)} />}
       <AuthModal isOpen={isAuthOpen} onClose={() => setIsAuthOpen(false)} initialMode={authMode} onLogin={handleLogin} language={language} brand={selectedBrand || 'aimefilms'} />
       <AccountModal 
         isOpen={isAccountOpen} 
