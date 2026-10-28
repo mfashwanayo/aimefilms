@@ -235,6 +235,9 @@ const App: React.FC = () => {
             if (activeCategory === 'Movies') return !s.genre.includes('TV Series');
             if (activeCategory === 'Series') return s.genre.includes('TV Series');
             if (activeCategory === 'Trending') return s.isTrending;
+            if (activeCategory === 'New Releases') return s.isNew;
+            if (activeCategory === 'Watchlist') return watchlist.includes(s.id);
+            if (activeCategory === 'Continue Watching') return continueWatching.includes(s.id);
             return s.genre.some(g => g.toLowerCase() === activeCategory.toLowerCase());
           }));
       const sectionTitle = activeCategory === 'Kinyarwanda' ? 'Films in Kinyarwanda'
@@ -299,16 +302,9 @@ const App: React.FC = () => {
         brand={selectedBrand || 'aimefilms'}
         onSwitchBrand={handleSwitchBrand}
       />
-      {selectedBrand === 'princefilms' && (
-        <PrinceFilmsSidebar
-          onHome={handleGoHome}
-          onCategoryFilter={handleCategoryFilter}
-          onSwitchBrand={handleSwitchBrand}
-          activeCategory={activeCategory}
-        />
-      )}
+      <PrinceFilmsSidebar brand={selectedBrand} user={user} onHome={handleGoHome} onCategoryFilter={handleCategoryFilter} onSwitchBrand={handleSwitchBrand} onOpenAuth={mode => { setAuthMode(mode); setIsAuthOpen(true); }} onOpenAccount={() => setIsAccountOpen(true)} activeCategory={activeCategory} />
       
-      <main className={showWelcome ? 'hidden' : `block pt-20 ${selectedBrand === 'princefilms' ? 'md:pl-64' : ''}`} >
+      <main className={showWelcome ? 'hidden' : 'block pt-20 md:pl-64'} >
         {currentView === 'home' ? (
           <>
             {!searchQuery && activeCategory === 'all' && (

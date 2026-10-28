@@ -118,7 +118,7 @@ const Navbar: React.FC<NavbarProps> = ({
   ];
 
   return (
-    <header role="banner" className={`fixed top-0 w-full ${brand === 'princefilms' ? 'md:left-64 md:w-[calc(100%-16rem)]' : ''} z-[100] transition-all duration-500 ${isScrolled || isMobileMenuOpen ? 'bg-black/95 backdrop-blur-md shadow-2xl border-b border-white/5' : 'bg-gradient-to-b from-black/95 to-transparent'}`}>
+    <header role="banner" className={`fixed top-0 left-0 md:left-64 w-full md:w-[calc(100%-16rem)] z-[100] transition-all duration-500 ${isScrolled || isMobileMenuOpen ? 'bg-black/95 backdrop-blur-md shadow-2xl border-b border-white/5' : 'bg-gradient-to-b from-black/95 to-transparent'}`}>
       <nav aria-label="Main Navigation" className="px-4 md:px-8 lg:px-12 py-4 md:py-5 flex items-center justify-between">
         
         <div className="flex items-center gap-4 md:gap-12">
@@ -134,16 +134,14 @@ const Navbar: React.FC<NavbarProps> = ({
             )}
           </button>
 
-          <button onClick={handleLogoPress} className={`hover:scale-105 transition-transform flex-shrink-0 ${brand === 'princefilms' ? 'md:hidden' : ''}`}>
+          <button onClick={handleLogoPress} className="hover:scale-105 transition-transform flex-shrink-0 md:hidden">
             <Logo size="sm" brand={brand} />
           </button>
           
-          {brand === 'princefilms' && (
-            <div className="hidden md:flex flex-col gap-1">
-              <span className="text-[9px] font-extrabold uppercase tracking-[0.28em] text-violet-300/70">PRINCEFILMS</span>
-              <span className="text-sm font-bold tracking-tight text-white">Discover your next favourite</span>
-            </div>
-          )}
+          <div className="hidden md:flex flex-col gap-1">
+            <span className={`text-[9px] font-extrabold uppercase tracking-[0.28em] ${brand === 'filmsnyarwanda' ? 'text-yellow-300/70' : brand === 'princefilms' ? 'text-violet-300/70' : 'text-red-300/70'}`}>{brand === 'filmsnyarwanda' ? 'FILMSNYARWANDA' : brand === 'princefilms' ? 'PRINCEFILMS' : 'AIMEFILMS'}</span>
+            <span className="text-sm font-bold tracking-tight text-white">Discover your next favourite</span>
+          </div>
           <div className={`${brand === 'princefilms' ? 'hidden' : 'hidden lg:flex'} gap-10 text-[10px] font-black uppercase tracking-[0.3em] text-gray-400`}>
             <button onClick={handleLogoPress} className="hover:text-white transition-colors uppercase">{t.relay}</button>
             <button onClick={() => onCategoryFilter('Series')} className="hover:text-white transition-colors uppercase">{t.series}</button>
