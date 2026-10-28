@@ -12,7 +12,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, quote, urlparse
+from urllib.parse import parse_qs, quote, unquote, urlparse
 
 from dotenv import load_dotenv
 import psycopg
@@ -358,6 +358,48 @@ def record_log(connection: psycopg.Connection, event_type: str, details: str, em
     )
 
 
+def remove_managed_video_objects(public_urls: list[str]) -> None:
+    """Remove only video objects owned by this application's configured Storage bucket."""
+    bucket_prefix = f"/storage/v1/object/public/{SUPABASE_VIDEO_BUCKET}/"
+    base = urlparse(SUPABASE_URL) if SUPABASE_URL else None
+    object_paths: list[str] = []
+    for value in public_urls:
+        if not value:
+            continue
+        parsed = urlparse(str(value))
+        if not parsed.path.startswith(bucket_prefix):
+            continue
+        if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY or base is None:
+            raise HTTPException(status_code=503, detail="The private Supabase Storage key is not configured; the movie was not deleted.")
+        if parsed.scheme != base.scheme or parsed.netloc != base.netloc:
+            continue
+        object_path = unquote(parsed.path[len(bucket_prefix):])
+        segments = object_path.split("/")
+        if not object_path or any(segment in ("", ".", "..") for segment in segments):
+            raise HTTPException(status_code=422, detail="A stored video URL contains an invalid object path.")
+        if object_path not in object_paths:
+            object_paths.append(object_path)
+
+    if not object_paths:
+        return
+    bucket_segment = quote(SUPABASE_VIDEO_BUCKET, safe="")
+    try:
+        response = requests.delete(
+            f"{SUPABASE_URL}/storage/v1/object/{bucket_segment}",
+            headers={
+                "apikey": SUPABASE_SERVICE_ROLE_KEY,
+                "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+                "Content-Type": "application/json",
+            },
+            json={"prefixes": object_paths},
+            timeout=(10, 60),
+        )
+    except requests.RequestException:
+        raise HTTPException(status_code=502, detail="Could not reach Supabase Storage. The movie was not deleted.")
+    if not response.ok:
+        raise HTTPException(status_code=502, detail="Supabase Storage could not delete the video's files. The movie was not deleted.")
+
+
 async def json_body(request: Request) -> dict[str, Any]:
     try:
         value = await request.json()
@@ -412,8 +454,8 @@ def search_movies(q: str = "") -> dict[str, Any]:
 
 @app.post("/api/seed")
 async def seed_movies(request: Request) -> dict[str, Any]:
-    # Seed only an empty catalogue. This keeps the existing frontend's initial
-    # catalogue import working; after the first seed this endpoint makes no changes.
+    # Seeding shared catalogue content is an administrator-only operation.
+    administrator = admin_user(request)
     body = await json_body(request)
     movies = body.get("movies", [])
     if not isinstance(movies, list):
@@ -430,7 +472,7 @@ async def seed_movies(request: Request) -> dict[str, Any]:
                 movie = normalize_movie(value if isinstance(value, dict) else {})
                 insert_movie(connection, movie)
                 inserted += 1
-            record_log(connection, "SYSTEM", f"Database seeded with {inserted} movies")
+            record_log(connection, "SYSTEM", f"Database seeded with {inserted} movies", administrator["email"])
         rows = connection.execute("SELECT * FROM movies WHERE is_hidden = 0 ORDER BY ordinal DESC").fetchall()
     return {"success": True, "inserted": inserted, "movies": [movie_from_row(row) for row in rows]}
 
@@ -537,14 +579,20 @@ def admin_users(request: Request) -> dict[str, Any]:
 
 @app.post("/api/admin/users/{email}/toggle-block")
 def toggle_block(email: str, request: Request) -> dict[str, Any]:
-    admin_user(request)
+    administrator = admin_user(request)
+    normalized_email = email.strip().lower()
     with db() as connection:
-        user = connection.execute("SELECT is_blocked FROM users WHERE email = %s", (email.lower(),)).fetchone()
-        if not user:
+        target = connection.execute(
+            "SELECT role, is_blocked FROM users WHERE lower(email) = %s",
+            (normalized_email,),
+        ).fetchone()
+        if not target:
             raise HTTPException(status_code=404, detail="User not found.")
-        blocked = not bool(user["is_blocked"])
-        connection.execute("UPDATE users SET is_blocked = %s WHERE email = %s", (int(blocked), email.lower()))
-        record_log(connection, "BLOCK", f"{'Blocked' if blocked else 'Unblocked'} user: {email}")
+        if target["role"] == "admin":
+            raise HTTPException(status_code=403, detail="Administrator accounts cannot be blocked from this screen.")
+        blocked = not bool(target["is_blocked"])
+        connection.execute("UPDATE users SET is_blocked = %s WHERE lower(email) = %s", (int(blocked), normalized_email))
+        record_log(connection, "BLOCK", f"{'Blocked' if blocked else 'Unblocked'} user: {normalized_email}", administrator["email"])
     return {"success": True, "isBlocked": blocked}
 
 
@@ -834,19 +882,28 @@ def upload_video(
     return response
 
 
+@app.get("/api/admin/movies")
+def admin_movies(request: Request) -> dict[str, Any]:
+    """Return all catalogue items, including hidden movies, to the admin."""
+    admin_user(request)
+    with db() as connection:
+        rows = connection.execute("SELECT * FROM movies ORDER BY ordinal DESC").fetchall()
+    return {"success": True, "movies": [movie_from_row(row) for row in rows]}
+
+
 @app.post("/api/admin/movies")
 async def add_movie(request: Request) -> dict[str, Any]:
-    admin_user(request)
+    administrator = admin_user(request)
     movie = normalize_movie(await json_body(request))
     with db() as connection:
         insert_movie(connection, movie)
-        record_log(connection, "UPLOAD", f"Uploaded movie: {movie['name']}")
+        record_log(connection, "UPLOAD", f"Uploaded movie: {movie['name']}", administrator["email"])
     return {"success": True, "movie": movie}
 
 
 @app.put("/api/admin/movies/{movie_id}")
 async def update_movie(movie_id: str, request: Request) -> dict[str, Any]:
-    admin_user(request)
+    administrator = admin_user(request)
     with db() as connection:
         existing = connection.execute("SELECT * FROM movies WHERE id = %s", (movie_id,)).fetchone()
         if not existing:
@@ -861,18 +918,27 @@ async def update_movie(movie_id: str, request: Request) -> dict[str, Any]:
             f"UPDATE movies SET {assignments} WHERE id = %s",
             tuple(values[MOVIE_FIELDS.index(field)] for field in fields) + (movie_id,),
         )
+        record_log(connection, "UPDATE", f"Updated movie: {movie['name']}", administrator["email"])
     return {"success": True, "movie": movie}
 
 
 @app.delete("/api/admin/movies/{movie_id}")
 def delete_movie(movie_id: str, request: Request) -> dict[str, Any]:
-    admin_user(request)
+    administrator = admin_user(request)
     with db() as connection:
+        movie = connection.execute(
+            "SELECT id, name, video_url, full_movie_url FROM movies WHERE id = %s",
+            (movie_id,),
+        ).fetchone()
+        if not movie:
+            raise HTTPException(status_code=404, detail="Movie not found.")
+        # Preserve the row when Storage cannot delete the managed video objects.
+        remove_managed_video_objects([movie.get("video_url") or "", movie.get("full_movie_url") or ""])
         connection.execute("DELETE FROM movies WHERE id = %s", (movie_id,))
         connection.execute("DELETE FROM views WHERE movie_id = %s", (movie_id,))
         connection.execute("DELETE FROM user_lists WHERE movie_id = %s", (movie_id,))
-        record_log(connection, "DELETE", f"Deleted movie: {movie_id}")
-    return {"success": True}
+        record_log(connection, "DELETE", f"Deleted movie and its stored videos: {movie['name']}", administrator["email"])
+    return {"success": True, "deletedId": movie_id}
 
 
 @app.get("/api/admin/messages")
