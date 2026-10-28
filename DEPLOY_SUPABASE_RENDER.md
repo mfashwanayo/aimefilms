@@ -70,12 +70,17 @@ The configured admin account is synchronized to `ADMIN_NAME`, `ADMIN_EMAIL`, and
 
 ## 4. Configure the frontend static site
 
-In the Render **Static Site** environment settings, add:
+The frontend must be built with the actual public URL of the deployed FastAPI service. Never use `http://localhost:8001` in a live site.
 
-- **Key:** `VITE_API_BASE_URL`
-- **Value:** the actual deployed backend URL, for example `https://aimefilms-api.onrender.com` (no trailing slash)
+**If you publish on GitHub Pages:**
+1. Open repository **Settings → Pages** and choose **Build and deployment → Source: GitHub Actions**.
+2. Open **Settings → Secrets and variables → Actions → Variables** and add a repository variable named `VITE_API_BASE_URL`.
+3. Set its value to the actual FastAPI service URL (for example, the Render URL assigned to `aimefilms-api`, without a trailing slash).
+4. Redeploy after setting the variable. The GitHub Pages workflow checks for it before building the production frontend.
 
-Use the actual URL Render assigns to your service. Trigger a frontend redeploy after changing this variable.
+For this repository, the GitHub Pages site URL should be `https://mfashwanayo.github.io/aimefilms/`; set the FastAPI `FRONTEND_ORIGINS` value to the origin `https://mfashwanayo.github.io` (no path, no trailing slash).
+
+**If you publish the frontend on Render Static Site instead**, add `VITE_API_BASE_URL` in that site's Environment settings and redeploy. Use the exact deployed website origin for the backend's `FRONTEND_ORIGINS`.
 
 ## 5. Test the deployment
 
@@ -91,7 +96,7 @@ Then open the frontend, test registration/login, and test an admin action. If th
 - The new backend expects Supabase PostgreSQL, not the old local SQLite file. Existing SQLite data is not automatically migrated by this patch; export/import it separately if you need to keep existing users or movies.
 - The `schema.sql` enables Row Level Security on the tables and defines no anonymous read policies. The frontend must access data through the FastAPI backend, not direct table queries.
 - Rotate the exposed admin password immediately. Deleting it from the latest source does not erase it from old Git history. If the repository was public while the credential was present, consider cleaning the history after rotation.
-- The one-time `/api/seed` endpoint remains for the existing frontend's initial catalogue seeding behavior. It only inserts when the movie table is empty; review/disable that behavior if you want all catalogue seeding to require an explicit administrator action.
+- `POST /api/seed` is administrator-only, and the public frontend no longer submits movies to seed the shared database. Upload and manage the production catalogue through the authenticated Admin dashboard.
 
 ## Video uploads (resumable, 3.9 GB target)
 
