@@ -72,7 +72,7 @@ const MovieDetailsPage: React.FC<MovieDetailsPageProps> = ({
 
   const handleDownloadClick = () => {
     if (!user) { onOpenAuth('signup'); return; }
-    if (user.canDownload || user.role === 'admin' || user.isVerified) setShowDownloadConfig(true);
+    if (user.role === 'admin' || user.canDownload === true) setShowDownloadConfig(true);
     else setShowPermissionError(true);
   };
 
