@@ -49,7 +49,12 @@ jobs:
               "/health",
               "/api/admin/videos/create-upload",
               "/api/admin/videos/complete-upload",
+              "/api/admin/movies",
+              "/api/admin/movies/{movie_id}",
+              "/api/admin/users",
+              "/api/admin/users/{email}/toggle-block",
               "/api/admin/messages",
+              "/api/auth/register",
               "/api/auth/login",
               "/api/movies",
           }
