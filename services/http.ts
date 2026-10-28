@@ -24,10 +24,20 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
 
     if (token) headers['Authorization'] = `Bearer ${token}`;
 
-    const res = await fetch(url, {
-        ...init,
-        headers,
-    });
+    let res: Response;
+    try {
+        res = await fetch(url, {
+            ...init,
+            headers,
+        });
+    } catch (error) {
+        // "Failed to fetch" is a network/configuration error, not an invalid
+        // password. Give admins the actual API target and likely fixes.
+        const detail = error instanceof Error ? error.message : String(error);
+        throw new Error(
+            `Cannot reach the AimeFilms API at ${url}. Check that the backend service is deployed and running, VITE_API_BASE_URL points to its public HTTPS URL, and FRONTEND_ORIGINS in the backend includes this website's exact origin. Browser error: ${detail}`
+        );
+    }
 
     const text = await res.text();
     if (!res.ok) {
