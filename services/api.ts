@@ -288,8 +288,11 @@ export class AimeFilmsAPI {
       const res = await backendLogin(identifier, password);
       if (res.success && res.user) return { success: true, user: res.user };
       return { success: false, message: res.message || 'Identity check failed.' };
-    } catch {
-      return { success: false, message: 'Authentication service is unavailable. Please try again.' };
+    } catch (error) {
+      // Preserve actionable backend errors (missing API URL, invalid credentials,
+      // CORS/network failures) so the admin can distinguish configuration issues.
+      const message = error instanceof Error ? error.message : 'Authentication failed.';
+      return { success: false, message };
     }
   }
 

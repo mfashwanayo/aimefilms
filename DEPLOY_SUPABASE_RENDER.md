@@ -118,3 +118,17 @@ Add the following in Render's backend service Environment settings:
 | `TMDB_API_KEY` | Optional private TMDB API key used by the admin Fetch TMDB button |
 
 After those values are set and the backend is deployed, sign in as admin, open **Film Inventory → Upload New Film**, choose a trailer or full movie file, and click **Commit to Database**. The UI displays progress and retries chunks after transient network errors. Videos are publicly readable for playback, so only upload content you have rights to distribute.
+
+
+## 5. If admin email/password login stopped working
+
+The login form uses the backend only; it no longer accepts browser-stored or hardcoded admin credentials.
+
+1. In Render, open the **AimeFilms API** service and confirm these environment variables exist: `DATABASE_URL`, `ADMIN_NAME`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`, and `TOKEN_SECRET`.
+2. `ADMIN_PASSWORD` must be at least 12 characters. Use the exact email in `ADMIN_EMAIL` (email comparison is case-insensitive). On backend startup, the configured admin account is synchronized to these values and its password is reset to `ADMIN_PASSWORD`.
+3. Confirm the Render service deployed successfully and its logs do not report missing environment variables or a database connection error.
+4. In GitHub repository **Settings → Secrets and variables → Actions → Variables**, confirm `VITE_API_BASE_URL` is set to the actual deployed API base URL (for example `https://your-api-service.onrender.com`, no trailing slash). Rebuild/redeploy the frontend after changing this value.
+5. Set `FRONTEND_ORIGINS` in Render to the exact public frontend origin, with no trailing slash. If using GitHub Pages, use the actual Pages domain.
+6. After changing settings, restart/redeploy the backend and redeploy the frontend. Then try the configured admin email and the new `ADMIN_PASSWORD`.
+
+Do not reuse the old password that was exposed in Git history. If you do not control the Render service settings, the code change alone cannot restore live login: those environment variables and the live deployment must be checked by the service owner.
