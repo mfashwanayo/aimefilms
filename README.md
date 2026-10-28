@@ -74,3 +74,21 @@ Required additional backend environment variables:
 - `MAX_VIDEO_UPLOAD_MB=3900`
 
 **Plan limit:** the current Supabase Free project is limited to 50 MB per file. To actually accept videos up to 3.9 GB, upgrade the Supabase project to Pro (or another plan that supports the size), then set Storage's Global file size limit to at least 3.9 GB. The bucket-level limit and backend variable alone cannot override the global plan limit.
+
+ 
+## Admin dashboard and database operations
+
+Admin actions are saved through the FastAPI/PostgreSQL database, not merely in this browser's local storage.
+
+- **Film Inventory:** edit title, brand, section, poster, description, synopsis, year, duration, rating, genres, cast, trending/new flags, trailer URL, or full-movie URL. Changes are saved through the authenticated backend.
+- **Show/hide:** hiding a film removes it from the public catalogue but keeps it in admin inventory so it can be shown again.
+- **Delete:** removes the movie and its view/watchlist records; video objects owned by the configured Supabase Storage bucket are removed through the Storage API.
+- **User Registry:** lists registered database accounts and metadata. Blocked users cannot sign in or use authenticated API routes. Administrator accounts are protected from being blocked here. Passwords are never displayed.
+- **Registration:** signup records are saved in the backend database with a salted PBKDF2 password hash, then appear in Admin → User Registry.
+- **Export Data:** downloads database-backed movies, user summaries, logs, messages, and analytics.
+
+### Live website configuration
+
+For GitHub Pages, add a repository Actions variable named `VITE_API_BASE_URL` at **Settings → Secrets and variables → Actions → Variables**. Its value must be the public base URL of the deployed FastAPI service, without a trailing slash. Set `FRONTEND_ORIGINS` to the exact GitHub Pages origin and configure the Supabase `DATABASE_URL` plus private Storage variables on the API service. Never expose the Supabase service-role key in frontend variables.
+
+The Pages workflow stops clearly if `VITE_API_BASE_URL` is missing, so a live build cannot silently ship with the local development URL.
