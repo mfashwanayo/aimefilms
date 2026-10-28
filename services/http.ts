@@ -1,4 +1,5 @@
-export const API_BASE_URL = (import.meta as any).env?.VITE_API_BASE_URL || 'http://localhost:8001';
+const configuredApiBase = ((import.meta as any).env?.VITE_API_BASE_URL || '').trim().replace(/\/+$/, '');
+export const API_BASE_URL = configuredApiBase || ((import.meta as any).env?.PROD ? '' : 'http://localhost:8001');
 
 export function getAuthToken(): string | null {
     return localStorage.getItem('aimefilms_token');
@@ -10,6 +11,9 @@ export function setAuthToken(token: string | null) {
 }
 
 export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
+    if (!path.startsWith('http://') && !path.startsWith('https://') && !API_BASE_URL) {
+        throw new Error('The live backend URL is not configured. Set the GitHub Actions variable VITE_API_BASE_URL to your deployed FastAPI service URL.');
+    }
     const url = path.startsWith('http://') || path.startsWith('https://') ? path : `${API_BASE_URL}${path}`;
 
     const token = getAuthToken();
@@ -27,12 +31,14 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
 
     const text = await res.text();
     if (!res.ok) {
+        let message = text || `HTTP ${res.status}`;
         try {
-            const j = JSON.parse(text);
-            throw new Error(j?.message || `HTTP ${res.status}`);
+            const body = JSON.parse(text);
+            message = body?.message || body?.detail || body?.error || message;
         } catch {
-            throw new Error(text || `HTTP ${res.status}`);
+            // Keep raw response text when it is not JSON.
         }
+        throw new Error(message);
     }
 
     return (text ? JSON.parse(text) : {}) as T;
