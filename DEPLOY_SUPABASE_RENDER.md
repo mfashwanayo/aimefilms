@@ -115,5 +115,6 @@ Add the following in Render's backend service Environment settings:
 | `SUPABASE_PUBLISHABLE_KEY` | The project's public/publishable API key |
 | `SUPABASE_VIDEO_BUCKET` | `aimefilms-videos` |
 | `MAX_VIDEO_UPLOAD_MB` | `3900` |
+| `TMDB_API_KEY` | Optional private TMDB API key used by the admin Fetch TMDB button |
 
 After those values are set and the backend is deployed, sign in as admin, open **Film Inventory → Upload New Film**, choose a trailer or full movie file, and click **Commit to Database**. The UI displays progress and retries chunks after transient network errors. Videos are publicly readable for playback, so only upload content you have rights to distribute.
