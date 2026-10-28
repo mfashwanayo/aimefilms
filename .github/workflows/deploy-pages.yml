@@ -31,7 +31,14 @@ jobs:
         run: npm ci
 
       - name: Build website for the repository URL
-        run: npm run build -- --base=/aimefilms/
+        env:
+          VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
+        run: |
+          if [ -z "$VITE_API_BASE_URL" ]; then
+            echo "::error title=Missing VITE_API_BASE_URL::Set a repository Actions variable to the deployed FastAPI backend URL before publishing the live website."
+            exit 1
+          fi
+          npm run build -- --base=/aimefilms/
 
       - name: Upload static website
         uses: actions/upload-pages-artifact@v3
