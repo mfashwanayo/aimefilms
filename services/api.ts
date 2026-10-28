@@ -22,6 +22,9 @@ async function backendAdminGetAnalytics(): Promise<any> {
 async function backendAdminGetUsers(): Promise<any> {
   return apiFetch<any>('/api/admin/users');
 }
+async function backendAdminGetMovies(): Promise<any> {
+  return apiFetch<any>('/api/admin/movies');
+}
 async function backendAdminToggleBlock(email: string): Promise<any> {
   return apiFetch<any>(`/api/admin/users/${encodeURIComponent(email)}/toggle-block`, { method: 'POST' });
 }
@@ -227,125 +230,53 @@ export class AimeFilmsAPI {
   }
 
   static async getLogs(): Promise<LogEntry[]> {
-    try {
-      if (getAuthToken()) {
-        const res = await backendAdminGetLogs();
-        if (res?.success) return res.logs;
-      }
-    } catch { /* fallback */ }
-    return this.getAnalytics().logs;
+    if (!getAuthToken()) throw new Error('Please sign in as an administrator to view database logs.');
+    const res = await backendAdminGetLogs();
+    if (!res?.success || !Array.isArray(res.logs)) throw new Error('Could not load logs from the database.');
+    return res.logs;
   }
 
   static async clearLogs(): Promise<void> {
-    try {
-      await backendAdminClearLogs();
-      return;
-    } catch { /* fallback */ }
-    const analytics = this.getAnalytics();
-    analytics.logs = [];
-    localStorage.setItem(ANALYTICS_KEY, JSON.stringify(analytics));
+    if (!getAuthToken()) throw new Error('Please sign in as an administrator to clear logs.');
+    const res = await backendAdminClearLogs();
+    if (!res?.success) throw new Error('Could not clear logs in the database.');
   }
 
   // --- MOVIES ADMIN ---
   static async addMovie(movie: Omit<StreamingService, 'id'>): Promise<StreamingService> {
-    try {
-      const res = await backendAdminAddMovie(movie);
-      if (res?.success && res.movie?.id) {
-        await this.addLog('UPLOAD', `Uploaded movie: ${movie.name}`);
-        return { ...movie, id: res.movie.id } as StreamingService;
-      }
-    } catch { /* fallback */ }
-
-    const db = this.getDB();
-    const newMovie = { ...movie, id: Math.random().toString(36).substr(2, 9) } as StreamingService;
-    db.unshift(newMovie);
-    localStorage.setItem(DB_KEY, JSON.stringify(db));
-    await this.addLog('UPLOAD', `Uploaded movie: ${newMovie.name}`);
-    return newMovie;
+    if (!getAuthToken()) throw new Error('Please sign in as an administrator before uploading a film.');
+    const res = await backendAdminAddMovie(movie);
+    if (!res?.success || !res.movie?.id) throw new Error('The film was not saved to the database.');
+    return res.movie as StreamingService;
   }
 
   static async updateMovie(id: string, updates: Partial<StreamingService>): Promise<boolean> {
-    try {
-      await backendAdminUpdateMovie(id, updates);
-      return true;
-    } catch { /* fallback */ }
-    const db = this.getDB();
-    const idx = db.findIndex(m => m.id === id);
-    if (idx !== -1) {
-      db[idx] = { ...db[idx], ...updates };
-      localStorage.setItem(DB_KEY, JSON.stringify(db));
-      return true;
-    }
-    return false;
+    if (!getAuthToken()) throw new Error('Please sign in as an administrator before changing a film.');
+    const res = await backendAdminUpdateMovie(id, updates);
+    if (!res?.success) throw new Error('The film changes were not saved to the database.');
+    return true;
   }
 
   static async deleteMovie(id: string): Promise<boolean> {
-    try {
-      await backendAdminDeleteMovie(id);
-      return true;
-    } catch { /* fallback */ }
-    const db = this.getDB();
-    const filtered = db.filter(m => m.id !== id);
-    localStorage.setItem(DB_KEY, JSON.stringify(filtered));
+    if (!getAuthToken()) throw new Error('Please sign in as an administrator before deleting a film.');
+    const res = await backendAdminDeleteMovie(id);
+    if (!res?.success) throw new Error('The film could not be deleted from the database.');
     return true;
   }
 
   // --- INTELLIGENCE / ANALYTICS ---
   static async getAllMessages(): Promise<UserMessage[]> {
-    try {
-      const res = await backendAdminGetAllMessages();
-      if (res?.success) return res.messages;
-    } catch { /* fallback */ }
-    const stored = localStorage.getItem(INBOX_KEY);
-    return stored ? JSON.parse(stored) : [];
+    if (!getAuthToken()) throw new Error('Please sign in as an administrator to view user messages.');
+    const res = await backendAdminGetAllMessages();
+    if (!res?.success || !Array.isArray(res.messages)) throw new Error('Could not load user messages from the database.');
+    return res.messages;
   }
 
   static async getIntelligenceData() {
-    try {
-      const res = await backendAdminGetAnalytics();
-      if (res?.success && res.analytics) return res.analytics;
-    } catch { /* fallback */ }
-
-    await delay(API_LATENCY);
-    const analytics = this.getAnalytics();
-    const movies = this.getDB();
-    const users = this.getUsers();
-
-    const topMovies = Object.entries(analytics.views)
-      .map(([id, views]) => {
-        const movie = movies.find(m => m.id === id);
-        return {
-          name: movie?.name || 'Unknown Asset',
-          views: views as number,
-          id,
-          brand: movie?.brand || 'aimefilms',
-          rating: movie ? parseFloat(movie.rating) : 0,
-          engagement: Math.min(100, (views as number) * 5)
-        };
-      })
-      .sort((a, b) => b.views - a.views)
-      .slice(0, 10);
-
-    const brandStats: Record<string, { views: number; movies: number }> = {
-      aimefilms: { views: 0, movies: movies.filter(m => m.brand === 'aimefilms').length },
-      filmsnyarwanda: { views: 0, movies: movies.filter(m => m.brand === 'filmsnyarwanda').length },
-      princefilms: { views: 0, movies: movies.filter(m => m.brand === 'princefilms').length }
-    };
-
-    Object.entries(analytics.views).forEach(([id, views]) => {
-      const movie = movies.find(m => m.id === id);
-      if (movie && brandStats[movie.brand]) {
-        brandStats[movie.brand].views += (views as number);
-      }
-    });
-
-    return {
-      topMovies,
-      totalViews: Object.values(analytics.views).reduce((a: any, b: any) => a + b, 0),
-      newUsers: users.slice(-10),
-      recentActivity: analytics.logs.slice(0, 20),
-      brandStats
-    };
+    if (!getAuthToken()) throw new Error('Please sign in as an administrator to view system insights.');
+    const res = await backendAdminGetAnalytics();
+    if (!res?.success || !res.analytics) throw new Error('Could not load analytics from the database.');
+    return res.analytics;
   }
 
   // --- AUTH ---
@@ -380,11 +311,17 @@ export class AimeFilmsAPI {
   }
 
   static async getAllUsers(): Promise<User[]> {
-    try {
-      const res = await backendAdminGetUsers();
-      if (res?.success) return res.users;
-    } catch { /* fallback */ }
-    return this.getUsers() as User[];
+    if (!getAuthToken()) throw new Error('Please sign in as an administrator to view the user registry.');
+    const res = await backendAdminGetUsers();
+    if (!res?.success || !Array.isArray(res.users)) throw new Error('Could not load users from the database.');
+    return res.users;
+  }
+
+  static async getAdminMovies(): Promise<StreamingService[]> {
+    if (!getAuthToken()) throw new Error('Please sign in as an administrator to manage films.');
+    const res = await backendAdminGetMovies();
+    if (!res?.success || !Array.isArray(res.movies)) throw new Error('Could not load the complete film inventory from the database.');
+    return res.movies;
   }
 
   static async getUserPosts(email: string): Promise<UserPost[]> {
@@ -395,37 +332,18 @@ export class AimeFilmsAPI {
     return gallery.filter(p => p.userEmail.toLowerCase() === email.toLowerCase());
   }
 
-  static async updateUserProfile(email: string, updates: { name: string; avatar: string }): Promise<boolean> {
-    try {
-      await backendUpdateProfile(updates.name, updates.avatar);
-      return true;
-    } catch { /* fallback */ }
-    await delay(API_LATENCY);
-    const users = this.getUsers();
-    const idx = users.findIndex(u => u.email.toLowerCase() === email.toLowerCase());
-    if (idx !== -1) {
-      users[idx].name = updates.name;
-      users[idx].avatar = updates.avatar;
-      this.saveUsers(users);
-      return true;
-    }
-    return false;
+  static async updateUserProfile(_email: string, updates: { name: string; avatar: string }): Promise<boolean> {
+    if (!getAuthToken()) throw new Error('Please sign in before updating the profile.');
+    const res = await backendUpdateProfile(updates.name, updates.avatar);
+    if (!res?.success) throw new Error('The profile changes were not saved to the database.');
+    return true;
   }
 
   static async toggleUserBlock(email: string): Promise<boolean> {
-    try {
-      await backendAdminToggleBlock(email);
-      return true;
-    } catch { /* fallback */ }
-    const users = this.getUsers();
-    const idx = users.findIndex(u => u.email === email);
-    if (idx !== -1) {
-      users[idx].isBlocked = !users[idx].isBlocked;
-      this.saveUsers(users);
-      await this.addLog('BLOCK', `${users[idx].isBlocked ? 'Blocked' : 'Unblocked'} user: ${email}`);
-      return true;
-    }
-    return false;
+    if (!getAuthToken()) throw new Error('Please sign in as an administrator to manage users.');
+    const res = await backendAdminToggleBlock(email);
+    if (!res?.success || typeof res.isBlocked !== 'boolean') throw new Error('The user status was not updated in the database.');
+    return true;
   }
 
   static getSystemStatus(): string {
