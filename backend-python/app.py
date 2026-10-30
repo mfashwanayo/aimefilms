@@ -216,6 +216,12 @@ def init_db() -> None:
         "ALTER TABLE movies ADD COLUMN IF NOT EXISTS subtitle_tracks TEXT NOT NULL DEFAULT '[]'",
         "ALTER TABLE movies ADD COLUMN IF NOT EXISTS audio_tracks TEXT NOT NULL DEFAULT '[]'",
         "CREATE INDEX IF NOT EXISTS movies_ordinal_idx ON movies (ordinal DESC)",
+        # Index the access patterns used by catalogue, inbox, audit and user-list queries.
+        "CREATE INDEX IF NOT EXISTS movies_public_section_ordinal_idx ON movies (is_hidden, section, ordinal DESC)",
+        "CREATE INDEX IF NOT EXISTS movies_name_lower_idx ON movies (lower(name))",
+        "CREATE INDEX IF NOT EXISTS messages_recipient_timestamp_idx ON messages (lower(to_email), timestamp DESC)",
+        "CREATE INDEX IF NOT EXISTS logs_timestamp_idx ON logs (timestamp DESC)",
+        "CREATE INDEX IF NOT EXISTS user_lists_owner_type_created_idx ON user_lists (email, list_type, created_at)",
         """CREATE TABLE IF NOT EXISTS views (
             movie_id TEXT PRIMARY KEY, view_count BIGINT NOT NULL DEFAULT 0, updated_at TEXT NOT NULL
         )""",
@@ -1110,7 +1116,71 @@ def admin_messages(request: Request) -> dict[str, Any]:
             """SELECT id, to_email AS \"toEmail\", from_name AS \"fromName\", subject, body,
                timestamp, is_read AS \"isRead\" FROM messages ORDER BY timestamp DESC"""
         ).fetchall()
-    return {"success": True, "messages": [dict(row) for row in rows]}
+    return {
+        "success": True,
+        "messages": [{**dict(row), "isRead": bool(row["isRead"])} for row in rows],
+    }
+
+
+@app.post("/api/admin/messages/{message_id}/read")
+def mark_admin_message_read(message_id: str, request: Request) -> dict[str, Any]:
+    administrator = admin_user(request)
+    with db() as connection:
+        row = connection.execute(
+            "UPDATE messages SET is_read = 1 WHERE id = %s RETURNING id",
+            (message_id,),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Message not found.")
+        record_log(connection, "MESSAGE_READ", f"Marked message {message_id} as read", administrator["email"])
+    return {"success": True, "id": message_id, "isRead": True}
+
+
+@app.delete("/api/admin/messages/{message_id}")
+def delete_admin_message(message_id: str, request: Request) -> dict[str, Any]:
+    administrator = admin_user(request)
+    with db() as connection:
+        row = connection.execute(
+            "DELETE FROM messages WHERE id = %s RETURNING id",
+            (message_id,),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Message not found.")
+        record_log(connection, "MESSAGE_DELETE", f"Deleted message {message_id}", administrator["email"])
+    return {"success": True, "deletedId": message_id}
+
+
+@app.get("/api/admin/system")
+def admin_system_status(request: Request) -> dict[str, Any]:
+    """Expose operational status without ever returning secrets or credentials."""
+    admin_user(request)
+    with db() as connection:
+        connection.execute("SELECT 1")
+        counts = {
+            "movies": connection.execute("SELECT COUNT(*) AS total FROM movies").fetchone()["total"],
+            "visibleMovies": connection.execute("SELECT COUNT(*) AS total FROM movies WHERE is_hidden = 0").fetchone()["total"],
+            "users": connection.execute("SELECT COUNT(*) AS total FROM users").fetchone()["total"],
+            "blockedUsers": connection.execute("SELECT COUNT(*) AS total FROM users WHERE is_blocked = 1").fetchone()["total"],
+            "messages": connection.execute("SELECT COUNT(*) AS total FROM messages").fetchone()["total"],
+            "unreadMessages": connection.execute("SELECT COUNT(*) AS total FROM messages WHERE is_read = 0").fetchone()["total"],
+            "views": connection.execute("SELECT COALESCE(SUM(view_count), 0) AS total FROM views").fetchone()["total"],
+        }
+    storage_ready = bool(SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY and SUPABASE_PUBLISHABLE_KEY)
+    return {
+        "success": True,
+        "system": {
+            "api": {"name": "AimeFilms API", "version": app.version, "status": "online"},
+            "database": {"status": "connected", "provider": "Supabase PostgreSQL" if DATABASE_URL else "PostgreSQL"},
+            "storage": {
+                "status": "configured" if storage_ready else "not_configured",
+                "provider": "Supabase Storage",
+                "bucket": SUPABASE_VIDEO_BUCKET,
+                "maxVideoUploadMB": MAX_VIDEO_UPLOAD_MB,
+            },
+            "frontendOrigins": FRONTEND_ORIGINS,
+            "counts": counts,
+        },
+    }
 
 
 @app.post("/api/messages")

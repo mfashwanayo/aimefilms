@@ -13,7 +13,7 @@ interface AdminDashboardProps {
 }
 
 const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefresh, brand }) => {
-  const [activeTab, setActiveTab] = useState<'movies' | 'users' | 'history' | 'feedback' | 'analytics' | 'media'>('analytics');
+  const [activeTab, setActiveTab] = useState<'movies' | 'users' | 'history' | 'feedback' | 'analytics' | 'media' | 'settings'>('analytics');
   const [movies, setMovies] = useState<StreamingService[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [editingUser, setEditingUser] = useState<User | null>(null);
@@ -24,6 +24,15 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [messages, setMessages] = useState<UserMessage[]>([]);
   const [stats, setStats] = useState<any>(null);
+  const [systemInfo, setSystemInfo] = useState<any>(null);
+  const [movieSearch, setMovieSearch] = useState('');
+  const [movieVisibility, setMovieVisibility] = useState<'all' | 'visible' | 'hidden'>('all');
+  const [userSearch, setUserSearch] = useState('');
+  const [userStatusFilter, setUserStatusFilter] = useState<'all' | 'active' | 'blocked' | 'admin'>('all');
+  const [logSearch, setLogSearch] = useState('');
+  const [logTypeFilter, setLogTypeFilter] = useState('all');
+  const [messageSearch, setMessageSearch] = useState('');
+  const [messageReadFilter, setMessageReadFilter] = useState<'all' | 'unread' | 'read'>('all');
   const [isLoading, setIsLoading] = useState(false);
   const [adminError, setAdminError] = useState('');
   const [editingMovieId, setEditingMovieId] = useState<string | null>(null);
@@ -50,10 +59,44 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
   // Default to the website from which the admin dashboard was opened, while
   // still allowing administrators to manage any movie across all three sites.
   const [catalogueFilter, setCatalogueFilter] = useState<Brand | 'all'>(brand);
-  const filteredMovies = useMemo(
-    () => catalogueFilter === 'all' ? movies : movies.filter(movie => movie.brand === catalogueFilter),
-    [movies, catalogueFilter]
-  );
+  const filteredMovies = useMemo(() => movies.filter(movie => {
+    const matchesBrand = catalogueFilter === 'all' || movie.brand === catalogueFilter;
+    const query = movieSearch.trim().toLowerCase();
+    const matchesSearch = !query || [movie.name, movie.description, movie.category, movie.year, ...(movie.genre || [])]
+      .some(value => String(value || '').toLowerCase().includes(query));
+    const matchesVisibility = movieVisibility === 'all' || (movieVisibility === 'hidden' ? Boolean(movie.isHidden) : !movie.isHidden);
+    return matchesBrand && matchesSearch && matchesVisibility;
+  }), [movies, catalogueFilter, movieSearch, movieVisibility]);
+
+  const filteredUsers = useMemo(() => users.filter(user => {
+    const query = userSearch.trim().toLowerCase();
+    const matchesSearch = !query || [user.name, user.email, user.language, user.role]
+      .some(value => String(value || '').toLowerCase().includes(query));
+    const matchesStatus = userStatusFilter === 'all'
+      || (userStatusFilter === 'active' && !user.isBlocked && user.role !== 'admin')
+      || (userStatusFilter === 'blocked' && Boolean(user.isBlocked))
+      || (userStatusFilter === 'admin' && user.role === 'admin');
+    return matchesSearch && matchesStatus;
+  }), [users, userSearch, userStatusFilter]);
+
+  const filteredLogs = useMemo(() => logs.filter(log => {
+    const query = logSearch.trim().toLowerCase();
+    const matchesSearch = !query || [log.details, log.userEmail, log.type, log.id]
+      .some(value => String(value || '').toLowerCase().includes(query));
+    return matchesSearch && (logTypeFilter === 'all' || log.type === logTypeFilter);
+  }), [logs, logSearch, logTypeFilter]);
+
+  const filteredMessages = useMemo(() => messages.filter(message => {
+    const query = messageSearch.trim().toLowerCase();
+    const matchesSearch = !query || [message.subject, message.fromName, message.toEmail, message.body]
+      .some(value => String(value || '').toLowerCase().includes(query));
+    const matchesRead = messageReadFilter === 'all'
+      || (messageReadFilter === 'unread' && !message.isRead)
+      || (messageReadFilter === 'read' && Boolean(message.isRead));
+    return matchesSearch && matchesRead;
+  }), [messages, messageSearch, messageReadFilter]);
+
+  const unreadMessageCount = useMemo(() => messages.filter(message => !message.isRead).length, [messages]);
 
   useEffect(() => {
     setCatalogueFilter(brand);
@@ -115,6 +158,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
       else if (activeTab === 'history') setLogs(await AimeFilmsAPI.getLogs());
       else if (activeTab === 'feedback') setMessages(await AimeFilmsAPI.getAllMessages());
       else if (activeTab === 'analytics') setStats(await AimeFilmsAPI.getIntelligenceData());
+      else if (activeTab === 'settings') setSystemInfo(await AimeFilmsAPI.getAdminSystemStatus());
     } catch (error) {
       setAdminError(error instanceof Error ? error.message : 'Could not load data from the database.');
     } finally {
@@ -296,6 +340,27 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
     }
   };
 
+  const handleMarkMessageRead = async (messageId: string) => {
+    setAdminError('');
+    try {
+      await AimeFilmsAPI.markAdminMessageRead(messageId);
+      setMessages(previous => previous.map(message => message.id === messageId ? { ...message, isRead: true } : message));
+    } catch (error) {
+      setAdminError(error instanceof Error ? error.message : 'The message could not be marked as read.');
+    }
+  };
+
+  const handleDeleteMessage = async (message: UserMessage) => {
+    if (!confirm(`Delete the message “${message.subject}”? This cannot be undone.`)) return;
+    setAdminError('');
+    try {
+      await AimeFilmsAPI.deleteAdminMessage(message.id);
+      setMessages(previous => previous.filter(item => item.id !== message.id));
+    } catch (error) {
+      setAdminError(error instanceof Error ? error.message : 'The message could not be deleted.');
+    }
+  };
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>, field: 'imageUrl' | 'landscapeImageUrl') => {
     const file = e.target.files?.[0]; e.target.value = ''; if (!file) return;
     if (!file.type.startsWith('image/')) { setUploadStatus('Choose a valid image file.'); return; }
@@ -334,7 +399,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
   ) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const allowedExtensions = /\\.(mp4|webm|mov|mkv)$/i;
+    const allowedExtensions = /\.(mp4|webm|mov|mkv)$/i;
     if (!allowedExtensions.test(file.name)) {
       setUploadStatus('Choose an MP4, WebM, MOV, or MKV video.');
       e.target.value = '';
@@ -377,7 +442,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
               { id: 'media', label: 'Media Library', icon: '📁' },
               { id: 'users', label: 'User Registry', icon: '👥' },
               { id: 'history', label: 'Event Logs', icon: '📜' },
-              { id: 'feedback', label: 'Feedback', icon: '💬', badge: messages.length },
+              { id: 'feedback', label: 'Feedback', icon: '💬', badge: unreadMessageCount },
+              { id: 'settings', label: 'System Status', icon: '⚙️' },
             ].map(tab => (
               <button
                 key={tab.id}
@@ -452,6 +518,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
               {activeTab === 'history' && 'System History'}
               {activeTab === 'feedback' && 'User Feedback'}
               {activeTab === 'media' && 'Media Library'}
+              {activeTab === 'settings' && 'System Status & Configuration'}
             </h2>
             {(activeTab === 'movies' || activeTab === 'media') && (
               <div className="flex flex-wrap items-center justify-end gap-3">
@@ -481,6 +548,42 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
               <div role="alert" className="mb-6 flex items-start justify-between gap-4 rounded-2xl border border-red-500/30 bg-red-500/10 px-5 py-4 text-sm text-red-200">
                 <span>{adminError}</span>
                 <button type="button" onClick={() => setAdminError('')} aria-label="Dismiss error" className="font-black text-red-100">×</button>
+              </div>
+            )}
+            {activeTab === 'movies' && (
+              <div className="mb-6 flex flex-wrap gap-3">
+                <input aria-label="Search films" value={movieSearch} onChange={e => setMovieSearch(e.target.value)} placeholder="Search by title, genre, category…" className="min-w-[220px] flex-1 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm outline-none focus:border-violet-400" />
+                <select aria-label="Filter film visibility" value={movieVisibility} onChange={e => setMovieVisibility(e.target.value as 'all' | 'visible' | 'hidden')} className="rounded-xl border border-white/10 bg-[#151515] px-4 py-3 text-sm">
+                  <option value="all">All visibility</option><option value="visible">Public films</option><option value="hidden">Hidden films</option>
+                </select>
+                <span className="self-center text-xs text-gray-500">{filteredMovies.length} of {movies.length} films</span>
+              </div>
+            )}
+            {activeTab === 'users' && (
+              <div className="mb-6 flex flex-wrap gap-3">
+                <input aria-label="Search accounts" value={userSearch} onChange={e => setUserSearch(e.target.value)} placeholder="Search name, email, role…" className="min-w-[220px] flex-1 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm outline-none focus:border-violet-400" />
+                <select aria-label="Filter accounts" value={userStatusFilter} onChange={e => setUserStatusFilter(e.target.value as 'all' | 'active' | 'blocked' | 'admin')} className="rounded-xl border border-white/10 bg-[#151515] px-4 py-3 text-sm">
+                  <option value="all">All accounts</option><option value="active">Active users</option><option value="blocked">Blocked users</option><option value="admin">Administrators</option>
+                </select>
+                <span className="self-center text-xs text-gray-500">{filteredUsers.length} of {users.length} accounts</span>
+              </div>
+            )}
+            {activeTab === 'history' && (
+              <div className="mb-6 flex flex-wrap gap-3">
+                <input aria-label="Search event logs" value={logSearch} onChange={e => setLogSearch(e.target.value)} placeholder="Search activity, user, event…" className="min-w-[220px] flex-1 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm outline-none focus:border-violet-400" />
+                <select aria-label="Filter event type" value={logTypeFilter} onChange={e => setLogTypeFilter(e.target.value)} className="rounded-xl border border-white/10 bg-[#151515] px-4 py-3 text-sm">
+                  <option value="all">All event types</option>{Array.from(new Set(logs.map(log => log.type))).sort().map(type => <option key={type} value={type}>{type}</option>)}
+                </select>
+                <span className="self-center text-xs text-gray-500">{filteredLogs.length} events</span>
+              </div>
+            )}
+            {activeTab === 'feedback' && (
+              <div className="mb-6 flex flex-wrap gap-3">
+                <input aria-label="Search messages" value={messageSearch} onChange={e => setMessageSearch(e.target.value)} placeholder="Search subject, sender or message…" className="min-w-[220px] flex-1 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm outline-none focus:border-violet-400" />
+                <select aria-label="Filter message status" value={messageReadFilter} onChange={e => setMessageReadFilter(e.target.value as 'all' | 'unread' | 'read')} className="rounded-xl border border-white/10 bg-[#151515] px-4 py-3 text-sm">
+                  <option value="all">All messages</option><option value="unread">Unread</option><option value="read">Read</option>
+                </select>
+                <span className="self-center text-xs text-gray-500">{unreadMessageCount} unread of {messages.length}</span>
               </div>
             )}
             {isLoading ? (
@@ -615,21 +718,31 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
                     </div>
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                       {filteredMovies.map(movie => {
-                        const mediaUrl = movie.fullMovieUrl || movie.videoUrl;
-                        const storagePath = mediaUrl?.includes('/aimefilms-videos/')
-                          ? mediaUrl.split('/aimefilms-videos/').pop()
-                          : mediaUrl;
+                        const assets = [
+                          movie.videoUrl ? { label: 'Trailer', url: movie.videoUrl } : null,
+                          movie.fullMovieUrl ? { label: 'Full movie', url: movie.fullMovieUrl } : null,
+                          ...(movie.subtitleTracks || []).map(track => ({ label: 'Subtitle · ' + track.language, url: track.url, fileName: track.fileName })),
+                          ...(movie.audioTracks || []).map(track => ({ label: 'Audio · ' + track.language, url: track.url, fileName: track.fileName })),
+                        ].filter(Boolean) as Array<{ label: string; url: string; fileName?: string }>;
                         return (
-                        <div key={movie.id} className="bg-white/5 border border-white/10 p-4 rounded-2xl space-y-3">
-                          <div className="aspect-video bg-black rounded-lg overflow-hidden border border-white/5">
-                            <img src={movie.imageUrl} className="w-full h-full object-cover opacity-50" />
+                          <div key={movie.id} className="bg-white/5 border border-white/10 p-4 rounded-2xl space-y-3">
+                            <div className="aspect-video bg-black rounded-lg overflow-hidden border border-white/5">
+                              <img src={movie.imageUrl} alt={movie.name} className="w-full h-full object-cover opacity-60" />
+                            </div>
+                            <div>
+                              <p className="text-[10px] font-black uppercase text-white truncate">{movie.name}</p>
+                              <p className="text-[9px] text-gray-500">{movie.brand} · {assets.length} asset(s)</p>
+                            </div>
+                            <div className="space-y-2">
+                              {assets.map((asset, index) => (
+                                <div key={asset.label + '-' + index} className="flex items-center justify-between gap-2 rounded-lg bg-black/30 px-3 py-2">
+                                  <span className="min-w-0 flex-1 truncate text-[10px] text-gray-300" title={asset.fileName || asset.url}>{asset.label}</span>
+                                  <a href={asset.url} target="_blank" rel="noreferrer" className="shrink-0 text-[10px] font-bold text-emerald-300 underline">Open</a>
+                                </div>
+                              ))}
+                              {assets.length === 0 && <p className="text-[10px] text-gray-500">No media assets attached.</p>}
+                            </div>
                           </div>
-                          <div>
-                            <p className="text-[10px] font-black uppercase text-white truncate">{movie.name}</p>
-                            <p className="text-[8px] font-black uppercase text-gray-500 mt-1 break-all">Storage: {storagePath || 'No uploaded video'}</p>
-                            {mediaUrl && <a href={mediaUrl} target="_blank" rel="noreferrer" className="text-[10px] text-green-400 underline">Open video</a>}
-                          </div>
-                        </div>
                         );
                       })}
                     </div>
@@ -657,10 +770,10 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-white/5">
-                        {users.length === 0 && (
-                          <tr><td colSpan={5} className="px-6 py-10 text-center text-sm text-gray-400">No accounts have registered in this database yet.</td></tr>
+                        {filteredUsers.length === 0 && (
+                          <tr><td colSpan={5} className="px-6 py-10 text-center text-sm text-gray-400">{users.length === 0 ? 'No accounts have registered in this database yet.' : 'No accounts match these filters.'}</td></tr>
                         )}
-                        {users.map(u => (
+                        {filteredUsers.map(u => (
                           <tr key={u.email} className="hover:bg-white/[0.02]">
                             <td className="px-8 py-6">
                               <div className="flex items-center gap-3">
@@ -721,7 +834,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
                       </button>
                     </div>
                     <div className="space-y-4">
-                      {logs.map(log => (
+                      {filteredLogs.map(log => (
                       <div key={log.id} className="bg-white/5 border border-white/10 p-6 rounded-2xl flex items-center justify-between group hover:bg-white/[0.08] transition-all">
                         <div className="flex items-center gap-6">
                           <div className={`w-12 h-12 rounded-xl flex items-center justify-center text-xl ${
@@ -748,21 +861,85 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
 
                 {activeTab === 'feedback' && (
                   <div className="grid grid-cols-1 gap-6">
-                    {messages.map(msg => (
-                      <div key={msg.id} className="bg-white/5 border border-white/10 p-8 rounded-[2rem] space-y-4">
-                        <div className="flex justify-between items-start">
-                          <div>
-                            <h3 className="text-xl font-black italic text-red-500">{msg.subject}</h3>
-                            <p className="text-sm font-bold text-gray-400">From: {msg.fromName}</p>
+                    {filteredMessages.map(msg => (
+                      <article key={msg.id} className="bg-white/5 border border-white/10 p-6 md:p-8 rounded-[2rem] space-y-4">
+                        <div className="flex flex-wrap justify-between items-start gap-4">
+                          <div className="min-w-0">
+                            <div className="mb-2 flex items-center gap-2">
+                              <h3 className="text-xl font-black italic text-red-400 break-words">{msg.subject}</h3>
+                              <span className={`rounded-full px-2 py-1 text-[9px] font-black uppercase tracking-wider ${msg.isRead ? 'bg-white/10 text-gray-400' : 'bg-amber-500/15 text-amber-300'}`}>{msg.isRead ? 'Read' : 'Unread'}</span>
+                            </div>
+                            <p className="text-sm font-bold text-gray-300">From: {msg.fromName}</p>
+                            <p className="mt-1 text-xs text-gray-500">To: {msg.toEmail}</p>
                           </div>
-                          <span className="text-[10px] font-mono text-gray-600">{new Date(msg.timestamp).toLocaleString()}</span>
+                          <span className="text-[10px] font-mono text-gray-500">{new Date(msg.timestamp).toLocaleString()}</span>
                         </div>
-                        <p className="text-gray-300 leading-relaxed font-medium">{msg.body}</p>
-                      </div>
+                        <p className="whitespace-pre-wrap break-words text-gray-300 leading-relaxed font-medium">{msg.body}</p>
+                        <div className="flex flex-wrap justify-end gap-2 border-t border-white/10 pt-4">
+                          {!msg.isRead && <button type="button" onClick={() => handleMarkMessageRead(msg.id)} className="rounded-xl bg-emerald-500/10 px-4 py-2 text-xs font-bold text-emerald-300 hover:bg-emerald-500/20">Mark as read</button>}
+                          <button type="button" onClick={() => handleDeleteMessage(msg)} className="rounded-xl bg-red-500/10 px-4 py-2 text-xs font-bold text-red-300 hover:bg-red-500/20">Delete message</button>
+                        </div>
+                      </article>
                     ))}
-                    {messages.length === 0 && <div className="text-center py-20 text-gray-500 font-black uppercase tracking-widest">No feedback received yet</div>}
+                    {filteredMessages.length === 0 && <div className="text-center py-20 text-gray-500">{messages.length === 0 ? 'No messages are stored in the database yet.' : 'No messages match these filters.'}</div>}
                   </div>
                 )}
+
+                {activeTab === 'settings' && systemInfo && (
+                  <div className="space-y-6">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <h3 className="text-xl font-black">Platform health</h3>
+                        <p className="mt-1 text-sm text-gray-400">Operational information only. Passwords and API keys are never returned to this screen.</p>
+                      </div>
+                      <button type="button" onClick={loadData} className="rounded-xl border border-white/10 px-4 py-2 text-xs font-bold text-gray-300 hover:bg-white/10">Refresh status</button>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <section className="rounded-2xl border border-white/10 bg-white/[0.04] p-6">
+                        <p className="text-xs font-bold uppercase tracking-widest text-gray-500">API service</p>
+                        <p className="mt-3 text-2xl font-black text-emerald-300">{systemInfo.api?.status || 'Unknown'}</p>
+                        <p className="mt-1 text-xs text-gray-400">{systemInfo.api?.name} · v{systemInfo.api?.version}</p>
+                      </section>
+                      <section className="rounded-2xl border border-white/10 bg-white/[0.04] p-6">
+                        <p className="text-xs font-bold uppercase tracking-widest text-gray-500">Database</p>
+                        <p className="mt-3 text-2xl font-black text-emerald-300">{systemInfo.database?.status || 'Unknown'}</p>
+                        <p className="mt-1 text-xs text-gray-400">{systemInfo.database?.provider || 'Database provider'}</p>
+                      </section>
+                      <section className="rounded-2xl border border-white/10 bg-white/[0.04] p-6">
+                        <p className="text-xs font-bold uppercase tracking-widest text-gray-500">Media storage</p>
+                        <p className={`mt-3 text-2xl font-black ${systemInfo.storage?.status === 'configured' ? 'text-emerald-300' : 'text-amber-300'}`}>{systemInfo.storage?.status || 'Unknown'}</p>
+                        <p className="mt-1 text-xs text-gray-400">{systemInfo.storage?.provider} · {systemInfo.storage?.bucket}</p>
+                      </section>
+                    </div>
+                    <section className="rounded-2xl border border-white/10 bg-white/[0.04] p-6">
+                      <h4 className="text-sm font-black uppercase tracking-widest text-gray-300">Database overview</h4>
+                      <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-4">
+                        {[
+                          ['Films', systemInfo.counts?.movies],
+                          ['Public films', systemInfo.counts?.visibleMovies],
+                          ['Registered users', systemInfo.counts?.users],
+                          ['Blocked users', systemInfo.counts?.blockedUsers],
+                          ['Total views', systemInfo.counts?.views],
+                          ['Messages', systemInfo.counts?.messages],
+                          ['Unread messages', systemInfo.counts?.unreadMessages],
+                          ['Video upload limit', systemInfo.storage?.maxVideoUploadMB ? `${systemInfo.storage.maxVideoUploadMB} MB` : 'Not set'],
+                        ].map(([label, value]) => (
+                          <div key={String(label)} className="rounded-xl border border-white/10 bg-black/20 p-4">
+                            <p className="text-[10px] font-bold uppercase tracking-wider text-gray-500">{label}</p>
+                            <p className="mt-2 text-xl font-black text-white">{value ?? '—'}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+                    <section className="rounded-2xl border border-white/10 bg-white/[0.04] p-6">
+                      <h4 className="text-sm font-black uppercase tracking-widest text-gray-300">Allowed website origins</h4>
+                      <p className="mt-2 text-xs text-gray-500">These are the configured CORS origins. Add the exact deployed website origin in the backend environment when deploying a new frontend.</p>
+                      <div className="mt-4 flex flex-wrap gap-2">{(systemInfo.frontendOrigins || []).map((origin: string) => <code key={origin} className="rounded-lg bg-black/30 px-3 py-2 text-xs text-gray-200">{origin}</code>)}</div>
+                    </section>
+                    <p className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-4 text-xs leading-relaxed text-amber-200">Storage configuration only confirms that the required server-side values exist. It does not test the provider's current quota or guarantee that the selected plan accepts the configured maximum upload size.</p>
+                  </div>
+                )}
+
               </>
             )}
           </main>
