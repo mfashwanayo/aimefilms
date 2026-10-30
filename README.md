@@ -37,6 +37,12 @@ Open `http://localhost:8001/docs` for interactive API documentation. `/health` v
 
 Use `POST /api/admin/videos/upload` in Swagger UI. Click **Authorize** and enter the admin bearer token, choose the video file, optionally set `movie_id` to update an existing movie, and set `field` to `fullMovieUrl` or `videoUrl`. Supported files: MP4, WebM, MOV and MKV. The current Supabase Free project is configured for a 50 MB per-file maximum. Set `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_VIDEO_BUCKET` and `MAX_VIDEO_UPLOAD_MB` in the backend environment. Keep the service-role key private.
 
+## Backend performance and operations
+
+The API creates PostgreSQL indexes for the catalogue's public section/name lookups, recipient inbox queries, audit-log ordering, and per-user watchlist/history reads. PostgreSQL handles these operations directly; no scheduled task is currently required for them. Add a scheduled worker only when the product introduces a real recurring workload such as expiring sessions, media-processing retries, or periodic cleanup.
+
+For durable video storage, use Supabase Storage (or another object-storage service) rather than the Render service's local filesystem. Render's ephemeral application filesystem is not a reliable place to keep user uploads across redeploys and restarts. Large video uploads should go directly from the browser to the storage provider using the authenticated upload flow; the API should authorize the upload and persist the resulting media reference.
+
 ## Database
 
 Supabase PostgreSQL is used for accounts, movies, views, watchlists, messages and logs. The schema is in `supabase/schema.sql`; the backend also creates missing tables at startup. Tables have Row Level Security enabled and should be accessed through the trusted FastAPI backend, not directly from browser code.
