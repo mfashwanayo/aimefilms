@@ -13,7 +13,7 @@ interface AdminDashboardProps {
 }
 
 const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefresh, brand }) => {
-  const [activeTab, setActiveTab] = useState<'movies' | 'users' | 'history' | 'feedback' | 'analytics' | 'media'>('analytics');
+  const [activeTab, setActiveTab] = useState<'movies' | 'users' | 'history' | 'feedback' | 'analytics' | 'media' | 'settings'>('analytics');
   const [movies, setMovies] = useState<StreamingService[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [editingUser, setEditingUser] = useState<User | null>(null);
@@ -24,6 +24,15 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [messages, setMessages] = useState<UserMessage[]>([]);
   const [stats, setStats] = useState<any>(null);
+  const [systemInfo, setSystemInfo] = useState<any>(null);
+  const [movieSearch, setMovieSearch] = useState('');
+  const [movieVisibility, setMovieVisibility] = useState<'all' | 'visible' | 'hidden'>('all');
+  const [userSearch, setUserSearch] = useState('');
+  const [userStatusFilter, setUserStatusFilter] = useState<'all' | 'active' | 'blocked' | 'admin'>('all');
+  const [logSearch, setLogSearch] = useState('');
+  const [logTypeFilter, setLogTypeFilter] = useState('all');
+  const [messageSearch, setMessageSearch] = useState('');
+  const [messageReadFilter, setMessageReadFilter] = useState<'all' | 'unread' | 'read'>('all');
   const [isLoading, setIsLoading] = useState(false);
   const [adminError, setAdminError] = useState('');
   const [editingMovieId, setEditingMovieId] = useState<string | null>(null);
@@ -50,10 +59,44 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
   // Default to the website from which the admin dashboard was opened, while
   // still allowing administrators to manage any movie across all three sites.
   const [catalogueFilter, setCatalogueFilter] = useState<Brand | 'all'>(brand);
-  const filteredMovies = useMemo(
-    () => catalogueFilter === 'all' ? movies : movies.filter(movie => movie.brand === catalogueFilter),
-    [movies, catalogueFilter]
-  );
+  const filteredMovies = useMemo(() => movies.filter(movie => {
+    const matchesBrand = catalogueFilter === 'all' || movie.brand === catalogueFilter;
+    const query = movieSearch.trim().toLowerCase();
+    const matchesSearch = !query || [movie.name, movie.description, movie.category, movie.year, ...(movie.genre || [])]
+      .some(value => String(value || '').toLowerCase().includes(query));
+    const matchesVisibility = movieVisibility === 'all' || (movieVisibility === 'hidden' ? Boolean(movie.isHidden) : !movie.isHidden);
+    return matchesBrand && matchesSearch && matchesVisibility;
+  }), [movies, catalogueFilter, movieSearch, movieVisibility]);
+
+  const filteredUsers = useMemo(() => users.filter(user => {
+    const query = userSearch.trim().toLowerCase();
+    const matchesSearch = !query || [user.name, user.email, user.language, user.role]
+      .some(value => String(value || '').toLowerCase().includes(query));
+    const matchesStatus = userStatusFilter === 'all'
+      || (userStatusFilter === 'active' && !user.isBlocked && user.role !== 'admin')
+      || (userStatusFilter === 'blocked' && Boolean(user.isBlocked))
+      || (userStatusFilter === 'admin' && user.role === 'admin');
+    return matchesSearch && matchesStatus;
+  }), [users, userSearch, userStatusFilter]);
+
+  const filteredLogs = useMemo(() => logs.filter(log => {
+    const query = logSearch.trim().toLowerCase();
+    const matchesSearch = !query || [log.details, log.userEmail, log.type, log.id]
+      .some(value => String(value || '').toLowerCase().includes(query));
+    return matchesSearch && (logTypeFilter === 'all' || log.type === logTypeFilter);
+  }), [logs, logSearch, logTypeFilter]);
+
+  const filteredMessages = useMemo(() => messages.filter(message => {
+    const query = messageSearch.trim().toLowerCase();
+    const matchesSearch = !query || [message.subject, message.fromName, message.toEmail, message.body]
+      .some(value => String(value || '').toLowerCase().includes(query));
+    const matchesRead = messageReadFilter === 'all'
+      || (messageReadFilter === 'unread' && !message.isRead)
+      || (messageReadFilter === 'read' && Boolean(message.isRead));
+    return matchesSearch && matchesRead;
+  }), [messages, messageSearch, messageReadFilter]);
+
+  const unreadMessageCount = useMemo(() => messages.filter(message => !message.isRead).length, [messages]);
 
   useEffect(() => {
     setCatalogueFilter(brand);
@@ -115,6 +158,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
       else if (activeTab === 'history') setLogs(await AimeFilmsAPI.getLogs());
       else if (activeTab === 'feedback') setMessages(await AimeFilmsAPI.getAllMessages());
       else if (activeTab === 'analytics') setStats(await AimeFilmsAPI.getIntelligenceData());
+      else if (activeTab === 'settings') setSystemInfo(await AimeFilmsAPI.getAdminSystemStatus());
     } catch (error) {
       setAdminError(error instanceof Error ? error.message : 'Could not load data from the database.');
     } finally {
@@ -377,7 +421,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
               { id: 'media', label: 'Media Library', icon: '📁' },
               { id: 'users', label: 'User Registry', icon: '👥' },
               { id: 'history', label: 'Event Logs', icon: '📜' },
-              { id: 'feedback', label: 'Feedback', icon: '💬', badge: messages.length },
+              { id: 'feedback', label: 'Feedback', icon: '💬', badge: unreadMessageCount },
+              { id: 'settings', label: 'System Status', icon: '⚙️' },
             ].map(tab => (
               <button
                 key={tab.id}
@@ -452,6 +497,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
               {activeTab === 'history' && 'System History'}
               {activeTab === 'feedback' && 'User Feedback'}
               {activeTab === 'media' && 'Media Library'}
+              {activeTab === 'settings' && 'System Status & Configuration'}
             </h2>
             {(activeTab === 'movies' || activeTab === 'media') && (
               <div className="flex flex-wrap items-center justify-end gap-3">
