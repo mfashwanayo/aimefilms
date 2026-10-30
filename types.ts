@@ -44,7 +44,7 @@ export interface User {
 
 export interface LogEntry {
   id: string;
-  type: 'VIEW' | 'LOGIN' | 'REGISTER' | 'UPLOAD' | 'DELETE' | 'BLOCK' | 'MESSAGE';
+  type: 'VIEW' | 'LOGIN' | 'REGISTER' | 'UPLOAD' | 'DELETE' | 'BLOCK' | 'MESSAGE' | 'MESSAGE_READ' | 'MESSAGE_DELETE' | 'UPDATE';
   details: string;
   userEmail?: string;
   timestamp: string;
