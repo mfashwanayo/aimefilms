@@ -760,8 +760,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-white/5">
-                        {users.length === 0 && (
-                          <tr><td colSpan={5} className="px-6 py-10 text-center text-sm text-gray-400">No accounts have registered in this database yet.</td></tr>
+                        {filteredUsers.length === 0 && (
+                          <tr><td colSpan={5} className="px-6 py-10 text-center text-sm text-gray-400">{users.length === 0 ? 'No accounts have registered in this database yet.' : 'No accounts match these filters.'}</td></tr>
                         )}
                         {filteredUsers.map(u => (
                           <tr key={u.email} className="hover:bg-white/[0.02]">
@@ -852,20 +852,84 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
                 {activeTab === 'feedback' && (
                   <div className="grid grid-cols-1 gap-6">
                     {filteredMessages.map(msg => (
-                      <div key={msg.id} className="bg-white/5 border border-white/10 p-8 rounded-[2rem] space-y-4">
-                        <div className="flex justify-between items-start">
-                          <div>
-                            <h3 className="text-xl font-black italic text-red-500">{msg.subject}</h3>
-                            <p className="text-sm font-bold text-gray-400">From: {msg.fromName}</p>
+                      <article key={msg.id} className="bg-white/5 border border-white/10 p-6 md:p-8 rounded-[2rem] space-y-4">
+                        <div className="flex flex-wrap justify-between items-start gap-4">
+                          <div className="min-w-0">
+                            <div className="mb-2 flex items-center gap-2">
+                              <h3 className="text-xl font-black italic text-red-400 break-words">{msg.subject}</h3>
+                              <span className={`rounded-full px-2 py-1 text-[9px] font-black uppercase tracking-wider ${msg.isRead ? 'bg-white/10 text-gray-400' : 'bg-amber-500/15 text-amber-300'}`}>{msg.isRead ? 'Read' : 'Unread'}</span>
+                            </div>
+                            <p className="text-sm font-bold text-gray-300">From: {msg.fromName}</p>
+                            <p className="mt-1 text-xs text-gray-500">To: {msg.toEmail}</p>
                           </div>
-                          <span className="text-[10px] font-mono text-gray-600">{new Date(msg.timestamp).toLocaleString()}</span>
+                          <span className="text-[10px] font-mono text-gray-500">{new Date(msg.timestamp).toLocaleString()}</span>
                         </div>
-                        <p className="text-gray-300 leading-relaxed font-medium">{msg.body}</p>
-                      </div>
+                        <p className="whitespace-pre-wrap break-words text-gray-300 leading-relaxed font-medium">{msg.body}</p>
+                        <div className="flex flex-wrap justify-end gap-2 border-t border-white/10 pt-4">
+                          {!msg.isRead && <button type="button" onClick={() => handleMarkMessageRead(msg.id)} className="rounded-xl bg-emerald-500/10 px-4 py-2 text-xs font-bold text-emerald-300 hover:bg-emerald-500/20">Mark as read</button>}
+                          <button type="button" onClick={() => handleDeleteMessage(msg)} className="rounded-xl bg-red-500/10 px-4 py-2 text-xs font-bold text-red-300 hover:bg-red-500/20">Delete message</button>
+                        </div>
+                      </article>
                     ))}
-                    {messages.length === 0 && <div className="text-center py-20 text-gray-500 font-black uppercase tracking-widest">No feedback received yet</div>}
+                    {filteredMessages.length === 0 && <div className="text-center py-20 text-gray-500">{messages.length === 0 ? 'No messages are stored in the database yet.' : 'No messages match these filters.'}</div>}
                   </div>
                 )}
+
+                {activeTab === 'settings' && systemInfo && (
+                  <div className="space-y-6">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <h3 className="text-xl font-black">Platform health</h3>
+                        <p className="mt-1 text-sm text-gray-400">Operational information only. Passwords and API keys are never returned to this screen.</p>
+                      </div>
+                      <button type="button" onClick={loadData} className="rounded-xl border border-white/10 px-4 py-2 text-xs font-bold text-gray-300 hover:bg-white/10">Refresh status</button>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <section className="rounded-2xl border border-white/10 bg-white/[0.04] p-6">
+                        <p className="text-xs font-bold uppercase tracking-widest text-gray-500">API service</p>
+                        <p className="mt-3 text-2xl font-black text-emerald-300">{systemInfo.api?.status || 'Unknown'}</p>
+                        <p className="mt-1 text-xs text-gray-400">{systemInfo.api?.name} · v{systemInfo.api?.version}</p>
+                      </section>
+                      <section className="rounded-2xl border border-white/10 bg-white/[0.04] p-6">
+                        <p className="text-xs font-bold uppercase tracking-widest text-gray-500">Database</p>
+                        <p className="mt-3 text-2xl font-black text-emerald-300">{systemInfo.database?.status || 'Unknown'}</p>
+                        <p className="mt-1 text-xs text-gray-400">{systemInfo.database?.provider || 'Database provider'}</p>
+                      </section>
+                      <section className="rounded-2xl border border-white/10 bg-white/[0.04] p-6">
+                        <p className="text-xs font-bold uppercase tracking-widest text-gray-500">Media storage</p>
+                        <p className={`mt-3 text-2xl font-black ${systemInfo.storage?.status === 'configured' ? 'text-emerald-300' : 'text-amber-300'}`}>{systemInfo.storage?.status || 'Unknown'}</p>
+                        <p className="mt-1 text-xs text-gray-400">{systemInfo.storage?.provider} · {systemInfo.storage?.bucket}</p>
+                      </section>
+                    </div>
+                    <section className="rounded-2xl border border-white/10 bg-white/[0.04] p-6">
+                      <h4 className="text-sm font-black uppercase tracking-widest text-gray-300">Database overview</h4>
+                      <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-4">
+                        {[
+                          ['Films', systemInfo.counts?.movies],
+                          ['Public films', systemInfo.counts?.visibleMovies],
+                          ['Registered users', systemInfo.counts?.users],
+                          ['Blocked users', systemInfo.counts?.blockedUsers],
+                          ['Total views', systemInfo.counts?.views],
+                          ['Messages', systemInfo.counts?.messages],
+                          ['Unread messages', systemInfo.counts?.unreadMessages],
+                          ['Video upload limit', systemInfo.storage?.maxVideoUploadMB ? `${systemInfo.storage.maxVideoUploadMB} MB` : 'Not set'],
+                        ].map(([label, value]) => (
+                          <div key={String(label)} className="rounded-xl border border-white/10 bg-black/20 p-4">
+                            <p className="text-[10px] font-bold uppercase tracking-wider text-gray-500">{label}</p>
+                            <p className="mt-2 text-xl font-black text-white">{value ?? '—'}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+                    <section className="rounded-2xl border border-white/10 bg-white/[0.04] p-6">
+                      <h4 className="text-sm font-black uppercase tracking-widest text-gray-300">Allowed website origins</h4>
+                      <p className="mt-2 text-xs text-gray-500">These are the configured CORS origins. Add the exact deployed website origin in the backend environment when deploying a new frontend.</p>
+                      <div className="mt-4 flex flex-wrap gap-2">{(systemInfo.frontendOrigins || []).map((origin: string) => <code key={origin} className="rounded-lg bg-black/30 px-3 py-2 text-xs text-gray-200">{origin}</code>)}</div>
+                    </section>
+                    <p className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-4 text-xs leading-relaxed text-amber-200">Storage configuration only confirms that the required server-side values exist. It does not test the provider's current quota or guarantee that the selected plan accepts the configured maximum upload size.</p>
+                  </div>
+                )}
+
               </>
             )}
           </main>
