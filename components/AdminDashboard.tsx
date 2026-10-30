@@ -399,7 +399,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
   ) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const allowedExtensions = /\\.(mp4|webm|mov|mkv)$/i;
+    const allowedExtensions = /\.(mp4|webm|mov|mkv)$/i;
     if (!allowedExtensions.test(file.name)) {
       setUploadStatus('Choose an MP4, WebM, MOV, or MKV video.');
       e.target.value = '';
@@ -718,21 +718,31 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
                     </div>
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                       {filteredMovies.map(movie => {
-                        const mediaUrl = movie.fullMovieUrl || movie.videoUrl;
-                        const storagePath = mediaUrl?.includes('/aimefilms-videos/')
-                          ? mediaUrl.split('/aimefilms-videos/').pop()
-                          : mediaUrl;
+                        const assets = [
+                          movie.videoUrl ? { label: 'Trailer', url: movie.videoUrl } : null,
+                          movie.fullMovieUrl ? { label: 'Full movie', url: movie.fullMovieUrl } : null,
+                          ...(movie.subtitleTracks || []).map(track => ({ label: 'Subtitle · ' + track.language, url: track.url, fileName: track.fileName })),
+                          ...(movie.audioTracks || []).map(track => ({ label: 'Audio · ' + track.language, url: track.url, fileName: track.fileName })),
+                        ].filter(Boolean) as Array<{ label: string; url: string; fileName?: string }>;
                         return (
-                        <div key={movie.id} className="bg-white/5 border border-white/10 p-4 rounded-2xl space-y-3">
-                          <div className="aspect-video bg-black rounded-lg overflow-hidden border border-white/5">
-                            <img src={movie.imageUrl} className="w-full h-full object-cover opacity-50" />
+                          <div key={movie.id} className="bg-white/5 border border-white/10 p-4 rounded-2xl space-y-3">
+                            <div className="aspect-video bg-black rounded-lg overflow-hidden border border-white/5">
+                              <img src={movie.imageUrl} alt={movie.name} className="w-full h-full object-cover opacity-60" />
+                            </div>
+                            <div>
+                              <p className="text-[10px] font-black uppercase text-white truncate">{movie.name}</p>
+                              <p className="text-[9px] text-gray-500">{movie.brand} · {assets.length} asset(s)</p>
+                            </div>
+                            <div className="space-y-2">
+                              {assets.map((asset, index) => (
+                                <div key={asset.label + '-' + index} className="flex items-center justify-between gap-2 rounded-lg bg-black/30 px-3 py-2">
+                                  <span className="min-w-0 flex-1 truncate text-[10px] text-gray-300" title={asset.fileName || asset.url}>{asset.label}</span>
+                                  <a href={asset.url} target="_blank" rel="noreferrer" className="shrink-0 text-[10px] font-bold text-emerald-300 underline">Open</a>
+                                </div>
+                              ))}
+                              {assets.length === 0 && <p className="text-[10px] text-gray-500">No media assets attached.</p>}
+                            </div>
                           </div>
-                          <div>
-                            <p className="text-[10px] font-black uppercase text-white truncate">{movie.name}</p>
-                            <p className="text-[8px] font-black uppercase text-gray-500 mt-1 break-all">Storage: {storagePath || 'No uploaded video'}</p>
-                            {mediaUrl && <a href={mediaUrl} target="_blank" rel="noreferrer" className="text-[10px] text-green-400 underline">Open video</a>}
-                          </div>
-                        </div>
                         );
                       })}
                     </div>
