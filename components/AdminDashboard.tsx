@@ -340,6 +340,27 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
     }
   };
 
+  const handleMarkMessageRead = async (messageId: string) => {
+    setAdminError('');
+    try {
+      await AimeFilmsAPI.markAdminMessageRead(messageId);
+      setMessages(previous => previous.map(message => message.id === messageId ? { ...message, isRead: true } : message));
+    } catch (error) {
+      setAdminError(error instanceof Error ? error.message : 'The message could not be marked as read.');
+    }
+  };
+
+  const handleDeleteMessage = async (message: UserMessage) => {
+    if (!confirm(`Delete the message “${message.subject}”? This cannot be undone.`)) return;
+    setAdminError('');
+    try {
+      await AimeFilmsAPI.deleteAdminMessage(message.id);
+      setMessages(previous => previous.filter(item => item.id !== message.id));
+    } catch (error) {
+      setAdminError(error instanceof Error ? error.message : 'The message could not be deleted.');
+    }
+  };
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>, field: 'imageUrl' | 'landscapeImageUrl') => {
     const file = e.target.files?.[0]; e.target.value = ''; if (!file) return;
     if (!file.type.startsWith('image/')) { setUploadStatus('Choose a valid image file.'); return; }
@@ -529,6 +550,42 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
                 <button type="button" onClick={() => setAdminError('')} aria-label="Dismiss error" className="font-black text-red-100">×</button>
               </div>
             )}
+            {activeTab === 'movies' && (
+              <div className="mb-6 flex flex-wrap gap-3">
+                <input aria-label="Search films" value={movieSearch} onChange={e => setMovieSearch(e.target.value)} placeholder="Search by title, genre, category…" className="min-w-[220px] flex-1 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm outline-none focus:border-violet-400" />
+                <select aria-label="Filter film visibility" value={movieVisibility} onChange={e => setMovieVisibility(e.target.value as 'all' | 'visible' | 'hidden')} className="rounded-xl border border-white/10 bg-[#151515] px-4 py-3 text-sm">
+                  <option value="all">All visibility</option><option value="visible">Public films</option><option value="hidden">Hidden films</option>
+                </select>
+                <span className="self-center text-xs text-gray-500">{filteredMovies.length} of {movies.length} films</span>
+              </div>
+            )}
+            {activeTab === 'users' && (
+              <div className="mb-6 flex flex-wrap gap-3">
+                <input aria-label="Search accounts" value={userSearch} onChange={e => setUserSearch(e.target.value)} placeholder="Search name, email, role…" className="min-w-[220px] flex-1 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm outline-none focus:border-violet-400" />
+                <select aria-label="Filter accounts" value={userStatusFilter} onChange={e => setUserStatusFilter(e.target.value as 'all' | 'active' | 'blocked' | 'admin')} className="rounded-xl border border-white/10 bg-[#151515] px-4 py-3 text-sm">
+                  <option value="all">All accounts</option><option value="active">Active users</option><option value="blocked">Blocked users</option><option value="admin">Administrators</option>
+                </select>
+                <span className="self-center text-xs text-gray-500">{filteredUsers.length} of {users.length} accounts</span>
+              </div>
+            )}
+            {activeTab === 'history' && (
+              <div className="mb-6 flex flex-wrap gap-3">
+                <input aria-label="Search event logs" value={logSearch} onChange={e => setLogSearch(e.target.value)} placeholder="Search activity, user, event…" className="min-w-[220px] flex-1 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm outline-none focus:border-violet-400" />
+                <select aria-label="Filter event type" value={logTypeFilter} onChange={e => setLogTypeFilter(e.target.value)} className="rounded-xl border border-white/10 bg-[#151515] px-4 py-3 text-sm">
+                  <option value="all">All event types</option>{Array.from(new Set(logs.map(log => log.type))).sort().map(type => <option key={type} value={type}>{type}</option>)}
+                </select>
+                <span className="self-center text-xs text-gray-500">{filteredLogs.length} events</span>
+              </div>
+            )}
+            {activeTab === 'feedback' && (
+              <div className="mb-6 flex flex-wrap gap-3">
+                <input aria-label="Search messages" value={messageSearch} onChange={e => setMessageSearch(e.target.value)} placeholder="Search subject, sender or message…" className="min-w-[220px] flex-1 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm outline-none focus:border-violet-400" />
+                <select aria-label="Filter message status" value={messageReadFilter} onChange={e => setMessageReadFilter(e.target.value as 'all' | 'unread' | 'read')} className="rounded-xl border border-white/10 bg-[#151515] px-4 py-3 text-sm">
+                  <option value="all">All messages</option><option value="unread">Unread</option><option value="read">Read</option>
+                </select>
+                <span className="self-center text-xs text-gray-500">{unreadMessageCount} unread of {messages.length}</span>
+              </div>
+            )}
             {isLoading ? (
               <div className="flex items-center justify-center h-full">
                 <div className={`w-10 h-10 border-4 border-${currentBrand.text.replace('text-', '')} border-t-transparent rounded-full animate-spin`} />
@@ -706,7 +763,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
                         {users.length === 0 && (
                           <tr><td colSpan={5} className="px-6 py-10 text-center text-sm text-gray-400">No accounts have registered in this database yet.</td></tr>
                         )}
-                        {users.map(u => (
+                        {filteredUsers.map(u => (
                           <tr key={u.email} className="hover:bg-white/[0.02]">
                             <td className="px-8 py-6">
                               <div className="flex items-center gap-3">
@@ -767,7 +824,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
                       </button>
                     </div>
                     <div className="space-y-4">
-                      {logs.map(log => (
+                      {filteredLogs.map(log => (
                       <div key={log.id} className="bg-white/5 border border-white/10 p-6 rounded-2xl flex items-center justify-between group hover:bg-white/[0.08] transition-all">
                         <div className="flex items-center gap-6">
                           <div className={`w-12 h-12 rounded-xl flex items-center justify-center text-xl ${
@@ -794,7 +851,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
 
                 {activeTab === 'feedback' && (
                   <div className="grid grid-cols-1 gap-6">
-                    {messages.map(msg => (
+                    {filteredMessages.map(msg => (
                       <div key={msg.id} className="bg-white/5 border border-white/10 p-8 rounded-[2rem] space-y-4">
                         <div className="flex justify-between items-start">
                           <div>
