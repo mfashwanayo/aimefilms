@@ -17,6 +17,24 @@ interface MovieDetailsPageProps {
   language: Language;
 }
 
+function readMovieComments(movieId: string): any[] {
+  try {
+    const raw = window.localStorage.getItem(`aimefilms_comments_${movieId}`);
+    const parsed: unknown = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveMovieComments(movieId: string, comments: any[]): void {
+  try {
+    window.localStorage.setItem(`aimefilms_comments_${movieId}`, JSON.stringify(comments));
+  } catch {
+    // The review remains visible for the current session if browser storage is unavailable.
+  }
+}
+
 const MovieDetailsPage: React.FC<MovieDetailsPageProps> = ({ 
   movie, 
   user,
@@ -37,7 +55,7 @@ const MovieDetailsPage: React.FC<MovieDetailsPageProps> = ({
 
   useEffect(() => {
     if (movie) {
-      const stored = JSON.parse(localStorage.getItem(`aimefilms_comments_${movie.id}`) || '[]');
+      const stored = readMovieComments(movie.id);
       const defaultComments = [
         { id: 1, user: 'CinemaLover', text: 'This movie exceeded all my expectations! The visuals are stunning.', rating: 5, date: '2 days ago' },
         { id: 2, user: 'JohnDoe', text: 'Great story summary, the actual movie is even better. Highly recommend.', rating: 4, date: '1 week ago' },
@@ -62,10 +80,9 @@ const MovieDetailsPage: React.FC<MovieDetailsPageProps> = ({
       date: 'Just now'
     };
     
-    // Save to persistence
-    const current = JSON.parse(localStorage.getItem(`aimefilms_comments_${movie.id}`) || '[]');
-    localStorage.setItem(`aimefilms_comments_${movie.id}`, JSON.stringify([newComment, ...current]));
-    
+    // Persist when browser storage is available; keep the review in current UI state either way.
+    const nextComments = [newComment, ...readMovieComments(movie.id)];
+    saveMovieComments(movie.id, nextComments);
     setComments([newComment, ...comments]);
     setComment('');
   };
