@@ -46,7 +46,7 @@ jobs:
           ADMIN_NAME: ci-admin
           ADMIN_EMAIL: ci-admin@example.com
           ADMIN_PASSWORD: ci-only-password
-          TOKEN_SECRET: ci-only-token-secret
+          TOKEN_SECRET: ci-token-secret-that-is-at-least-thirty-two-characters-long
           VIDEO_STORAGE_DRIVER: local
         run: |
           python - <<'PY'
