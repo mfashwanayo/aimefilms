@@ -802,51 +802,186 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
                 )}
 
                 {activeTab === 'movies' && (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {filteredMovies.length === 0 && (
-                      <div className="col-span-full rounded-2xl border border-white/10 bg-white/[0.03] p-8 text-center">
-                        <p className="font-bold text-white">
-                          {catalogueFilter === 'all' ? 'No films are stored in the database yet.' : `No films found for ${catalogueFilter === 'filmsnyarwanda' ? 'FilmsNyarwanda' : catalogueFilter === 'princefilms' ? 'PrinceFilms' : 'AimeFilms'}.`}
-                        </p>
-                        <p className="mt-2 text-sm text-gray-400">Choose another website filter, or upload a film to create its database record.</p>
+                  <section className="overflow-hidden rounded-xl border border-slate-700 bg-[#172235] shadow-lg shadow-black/10">
+                    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-700 px-5 py-4">
+                      <div>
+                        <h3 className="text-sm font-semibold text-white">Content management</h3>
+                        <p className="mt-1 text-[10px] text-slate-500">Manage films across AimeFilms, FilmsNyarwanda and PrinceFilms</p>
                       </div>
-                    )}
-                    {filteredMovies.map(movie => (
-                      <div key={movie.id} className={`bg-white/5 border border-white/10 rounded-3xl overflow-hidden group hover:border-${currentBrand.text.replace('text-', '')}/50 transition-all`}>
-                        <div className="aspect-video relative">
-                          <img src={movie.imageUrl} className="w-full h-full object-cover opacity-60 group-hover:opacity-100 transition-all" />
-                          <div className="absolute top-4 left-4 flex gap-2">
-                            <div className="bg-black/80 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest border border-white/10">
-                              {movie.section}
-                            </div>
-                            <div className={`bg-black/80 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest border border-white/10 ${movie.brand === 'filmsnyarwanda' ? 'text-blue-500' : movie.brand === 'princefilms' ? 'text-purple-500' : 'text-red-500'}`}>
-                              {movie.brand}
-                            </div>
-                          </div>
+                      <div className="flex items-center gap-2">
+                        <span className="rounded-md border border-slate-600 bg-slate-800 px-2.5 py-1.5 text-[10px] text-slate-300">{filteredMovies.length} results</span>
+                        <button type="button" onClick={loadData} className="inline-flex items-center gap-1.5 rounded-md border border-slate-600 px-2.5 py-1.5 text-[10px] font-semibold text-slate-300 hover:bg-slate-700"><Activity size={12} /> Refresh</button>
+                      </div>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full min-w-[850px] text-left">
+                        <thead className="bg-slate-800/90">
+                          <tr className="text-[9px] font-bold uppercase tracking-[0.12em] text-slate-400">
+                            <th className="px-4 py-3">Content</th>
+                            <th className="px-4 py-3">Brand / Section</th>
+                            <th className="px-4 py-3">Genre</th>
+                            <th className="px-4 py-3">Quality</th>
+                            <th className="px-4 py-3">Status</th>
+                            <th className="px-4 py-3 text-right">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-700/70">
+                          {filteredMovies.map(movie => (
+                            <tr key={movie.id} className="transition-colors hover:bg-slate-800/50">
+                              <td className="px-4 py-3">
+                                <div className="flex items-center gap-3">
+                                  <div className="h-12 w-9 shrink-0 overflow-hidden rounded-md bg-slate-800">
+                                    {movie.imageUrl ? <img src={movie.imageUrl} alt={movie.name} className="h-full w-full object-cover" /> : <div className="flex h-full items-center justify-center text-slate-500"><FileVideo size={15} /></div>}
+                                  </div>
+                                  <div className="min-w-0">
+                                    <p className="max-w-[260px] truncate text-xs font-semibold text-slate-100">{movie.name}</p>
+                                    <p className="mt-1 text-[10px] text-slate-500">{movie.year || 'Year not set'} {movie.duration ? '· ' + movie.duration : ''}</p>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="px-4 py-3">
+                                <p className="text-[10px] font-semibold text-slate-200">{movie.brand}</p>
+                                <p className="mt-1 text-[9px] capitalize text-slate-500">{movie.section}</p>
+                              </td>
+                              <td className="px-4 py-3">
+                                <p className="max-w-[150px] truncate text-[10px] text-slate-300">{(movie.genre || []).slice(0, 2).join(', ') || movie.category || '—'}</p>
+                              </td>
+                              <td className="px-4 py-3">
+                                <span className="rounded-md border border-indigo-400/30 bg-indigo-500/10 px-2 py-1 text-[9px] font-bold text-indigo-200">{movie.version || 'Standard'}</span>
+                              </td>
+                              <td className="px-4 py-3">
+                                <span className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[9px] font-semibold ${movie.isHidden ? 'bg-amber-400/10 text-amber-300' : 'bg-emerald-400/10 text-emerald-300'}`}>
+                                  <span className={`h-1.5 w-1.5 rounded-full ${movie.isHidden ? 'bg-amber-300' : 'bg-emerald-300'}`} />
+                                  {movie.isHidden ? 'Hidden' : 'Published'}
+                                </span>
+                                {movie.isTrending && <span className="ml-1 text-[9px] text-violet-300">Trending</span>}
+                              </td>
+                              <td className="px-4 py-3">
+                                <div className="flex items-center justify-end gap-1.5">
+                                  <button type="button" onClick={() => handleToggleMovieVisibility(movie)} title={movie.isHidden ? 'Publish film' : 'Hide film'} className="rounded-md border border-slate-600 p-2 text-slate-300 hover:border-slate-500 hover:bg-slate-700">
+                                    {movie.isHidden ? <Eye size={13} /> : <EyeOff size={13} />}
+                                  </button>
+                                  <button type="button" onClick={() => handleEditMovie(movie)} title="Edit film" className="rounded-md border border-indigo-400/30 p-2 text-indigo-300 hover:bg-indigo-500/15">
+                                    <Pencil size={13} />
+                                  </button>
+                                  <button type="button" onClick={() => handleDeleteMovie(movie)} title="Delete film" className="rounded-md border border-rose-400/30 p-2 text-rose-300 hover:bg-rose-500/15">
+                                    <Trash2 size={13} />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                          {filteredMovies.length === 0 && (
+                            <tr><td colSpan={6} className="px-5 py-14 text-center">
+                              <Clapperboard size={28} className="mx-auto text-slate-600" />
+                              <p className="mt-3 text-xs font-semibold text-slate-300">{movies.length === 0 ? 'Your content library is empty' : 'No films match these filters'}</p>
+                              <p className="mt-1 text-[10px] text-slate-500">Change the search or filter, or create a new film.</p>
+                              <button type="button" onClick={handleStartNewMovie} className="mt-4 rounded-lg bg-indigo-600 px-4 py-2 text-[10px] font-semibold text-white hover:bg-indigo-500">Add new content</button>
+                            </td></tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </section>
+                )}
+
+                {activeTab === 'upload' && (
+                  <div className="space-y-5">
+                    <div className="flex flex-wrap items-end justify-between gap-3">
+                      <div>
+                        <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-indigo-300">Content manager</p>
+                        <h3 className="mt-1 text-xl font-semibold text-white">Upload & transcode</h3>
+                        <p className="mt-1 text-xs text-slate-400">Add a film and upload its source video to your configured media storage</p>
+                      </div>
+                      <button type="button" onClick={handleStartNewMovie} className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-xs font-semibold text-white shadow-lg shadow-indigo-950/30 hover:bg-indigo-500">
+                        <CloudUpload size={15} /> Create film
+                      </button>
+                    </div>
+
+                    <section className="rounded-xl border border-slate-700 bg-[#172235] p-4 shadow-lg shadow-black/10">
+                      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <h4 className="text-sm font-semibold text-white">Single movie upload</h4>
+                          <p className="mt-1 text-[10px] text-slate-500">Choose a source video, then complete its metadata before saving</p>
                         </div>
-                        <div className="p-6 flex justify-between items-center">
-                          <div>
-                            <h3 className="font-black text-lg italic">{movie.name}</h3>
-                            <p className="text-xs text-gray-500 font-bold uppercase">{movie.year} • {movie.duration}</p>
-                          </div>
-                          <div className="flex gap-2">
-                            <button 
-                              onClick={() => handleToggleMovieVisibility(movie)} 
-                              className={`p-3 rounded-xl transition-all ${movie.isHidden ? 'bg-yellow-600/20 text-yellow-500' : 'bg-green-600/20 text-green-500'}`}
-                              title={movie.isHidden ? "Show Movie" : "Hide Movie"}
-                            >
-                              {movie.isHidden ? '👁️‍🗨️' : '👁️'}
-                            </button>
-                            <button type="button" onClick={() => handleEditMovie(movie)} title="Edit film details" className="p-3 rounded-xl bg-violet-600/10 text-violet-300 hover:bg-violet-600 hover:text-white transition-all">
-                              ✏️
-                            </button>
-                            <button type="button" onClick={() => handleDeleteMovie(movie)} title="Delete film and its managed video files" className={`p-3 bg-red-600/10 text-red-500 rounded-xl hover:${currentBrand.bg} hover:text-white transition-all`}>
-                              🗑️
-                            </button>
-                          </div>
+                        <span className="rounded-md border border-emerald-400/20 bg-emerald-400/10 px-2.5 py-1 text-[9px] font-semibold text-emerald-300">Resumable upload enabled</span>
+                      </div>
+                      <label
+                        onDragOver={e => { e.preventDefault(); setUploadDragActive(true); }}
+                        onDragLeave={e => { e.preventDefault(); setUploadDragActive(false); }}
+                        onDrop={e => {
+                          e.preventDefault();
+                          setUploadDragActive(false);
+                          const file = e.dataTransfer.files?.[0];
+                          if (file) handleQuickUpload(file);
+                        }}
+                        className={`flex min-h-[210px] cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed px-5 py-8 text-center transition ${uploadDragActive ? 'border-indigo-400 bg-indigo-500/10' : 'border-slate-500 bg-slate-900/50 hover:border-indigo-400 hover:bg-indigo-500/5'}`}
+                      >
+                        <input
+                          type="file"
+                          accept=".mp4,.webm,.mov,.mkv,video/mp4,video/webm,video/quicktime,video/x-matroska"
+                          className="sr-only"
+                          onChange={e => { const file = e.currentTarget.files?.[0]; if (file) handleQuickUpload(file); e.currentTarget.value = ''; }}
+                        />
+                        <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-indigo-500/10 text-indigo-300"><CloudUpload size={25} strokeWidth={1.6} /></div>
+                        <p className="text-sm font-semibold text-slate-100">Drag & drop a video file here or click to browse</p>
+                        <p className="mt-1 text-[10px] text-slate-500">MP4, MKV, MOV or WebM · maximum application size 3.9 GB</p>
+                        <p className="mt-4 rounded-md border border-slate-600 bg-slate-800 px-3 py-1.5 text-[10px] font-semibold text-slate-300">Select source video</p>
+                      </label>
+                      <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
+                        <div className="rounded-lg border border-slate-700 bg-slate-900/40 p-3">
+                          <div className="flex items-center gap-2 text-indigo-300"><FileVideo size={15} /><span className="text-[10px] font-semibold text-slate-200">1. Select source</span></div>
+                          <p className="mt-2 text-[10px] leading-relaxed text-slate-500">Choose the original video file from your computer.</p>
+                        </div>
+                        <div className="rounded-lg border border-slate-700 bg-slate-900/40 p-3">
+                          <div className="flex items-center gap-2 text-indigo-300"><Clapperboard size={15} /><span className="text-[10px] font-semibold text-slate-200">2. Add metadata</span></div>
+                          <p className="mt-2 text-[10px] leading-relaxed text-slate-500">Enter title, poster, genre, release details and select trailer or full-movie upload.</p>
+                        </div>
+                        <div className="rounded-lg border border-slate-700 bg-slate-900/40 p-3">
+                          <div className="flex items-center gap-2 text-indigo-300"><HardDrive size={15} /><span className="text-[10px] font-semibold text-slate-200">3. Upload to storage</span></div>
+                          <p className="mt-2 text-[10px] leading-relaxed text-slate-500">The browser sends resumable chunks to Supabase Storage; the API saves the media reference.</p>
                         </div>
                       </div>
-                    ))}
+                    </section>
+
+                    <section className="rounded-xl border border-amber-400/20 bg-amber-400/5 p-4">
+                      <div className="flex items-start gap-3">
+                        <Settings size={16} className="mt-0.5 shrink-0 text-amber-300" />
+                        <div>
+                          <p className="text-xs font-semibold text-amber-200">Transcoding service not connected</p>
+                          <p className="mt-1 text-[10px] leading-relaxed text-amber-100/70">This project currently uploads and stores the original video file. FFmpeg encoding, GPU processing, bitrate conversion and an automated transcoding queue are not configured, so this page does not show simulated encoding progress.</p>
+                        </div>
+                      </div>
+                    </section>
+
+                    <section className="overflow-hidden rounded-xl border border-slate-700 bg-[#172235]">
+                      <div className="flex items-center justify-between border-b border-slate-700 px-5 py-4">
+                        <div>
+                          <h4 className="text-sm font-semibold text-white">Uploaded content</h4>
+                          <p className="mt-1 text-[10px] text-slate-500">Films with a linked trailer or full-movie file</p>
+                        </div>
+                        <span className="rounded-md bg-slate-800 px-2.5 py-1 text-[10px] text-slate-300">{movies.filter(movie => movie.videoUrl || movie.fullMovieUrl).length} files linked</span>
+                      </div>
+                      <div className="divide-y divide-slate-700/70">
+                        {movies.filter(movie => movie.videoUrl || movie.fullMovieUrl).slice(0, 8).map(movie => (
+                          <div key={movie.id} className="flex flex-wrap items-center justify-between gap-3 px-5 py-3">
+                            <div className="flex min-w-0 items-center gap-3">
+                              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-800 text-indigo-300"><FileVideo size={16} /></div>
+                              <div className="min-w-0">
+                                <p className="truncate text-xs font-semibold text-slate-200">{movie.name}</p>
+                                <p className="mt-0.5 text-[9px] text-slate-500">{movie.brand} · {movie.fullMovieUrl ? 'Full movie' : 'Trailer'}</p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              {movie.fullMovieUrl && <a href={movie.fullMovieUrl} target="_blank" rel="noreferrer" className="text-[10px] font-semibold text-indigo-300 hover:text-indigo-200">Open movie</a>}
+                              {!movie.fullMovieUrl && movie.videoUrl && <a href={movie.videoUrl} target="_blank" rel="noreferrer" className="text-[10px] font-semibold text-indigo-300 hover:text-indigo-200">Open trailer</a>}
+                              <button type="button" onClick={() => handleEditMovie(movie)} className="rounded-md border border-slate-600 p-2 text-slate-300 hover:bg-slate-700" title="Edit media"><Pencil size={12} /></button>
+                            </div>
+                          </div>
+                        ))}
+                        {movies.filter(movie => movie.videoUrl || movie.fullMovieUrl).length === 0 && <p className="px-5 py-10 text-center text-xs text-slate-500">No video uploads have been linked yet.</p>}
+                      </div>
+                    </section>
                   </div>
                 )}
 
