@@ -16,7 +16,6 @@ __pycache__/
 
 # Local media files and partial uploads (never commit video files)
 backend-python/storage/
-!backend-python/storage/.gitkeep
 
 # Logs
 logs/
