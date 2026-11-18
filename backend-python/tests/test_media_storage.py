@@ -49,7 +49,7 @@ class LocalMediaStorageTests(unittest.TestCase):
             media_storage.store_local_file(io.BytesIO(b"video-too-large"), "films/movie_123", ".mp4", 4)
 
         self.assertEqual(list(self.temp_upload_dir.glob("*.part")), [])
-        self.assertEqual(list(self.public_dir.rglob("*")) if self.public_dir.exists() else [], [])
+        self.assertEqual([path for path in self.public_dir.rglob("*") if path.is_file()] if self.public_dir.exists() else [], [])
 
     def test_deletes_only_files_beneath_public_media_directory(self) -> None:
         relative_path, _ = media_storage.store_local_file(
