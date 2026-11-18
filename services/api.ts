@@ -40,6 +40,15 @@ async function backendAdminClearLogs(): Promise<any> {
 async function backendAdminGetAllMessages(): Promise<any> {
   return apiFetch<any>('/api/admin/messages');
 }
+async function backendAdminMarkMessageRead(id: string): Promise<any> {
+  return apiFetch<any>(`/api/admin/messages/${encodeURIComponent(id)}/read`, { method: 'POST' });
+}
+async function backendAdminDeleteMessage(id: string): Promise<any> {
+  return apiFetch<any>(`/api/admin/messages/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+async function backendAdminGetSystemStatus(): Promise<any> {
+  return apiFetch<any>('/api/admin/system');
+}
 async function backendAdminAddMovie(movie: any): Promise<any> {
   return apiFetch<any>('/api/admin/movies', { method: 'POST', body: JSON.stringify(movie) });
 }
@@ -273,6 +282,25 @@ export class AimeFilmsAPI {
     const res = await backendAdminGetAllMessages();
     if (!res?.success || !Array.isArray(res.messages)) throw new Error('Could not load user messages from the database.');
     return res.messages;
+  }
+
+  static async markAdminMessageRead(id: string): Promise<void> {
+    if (!getAuthToken()) throw new Error('Please sign in as an administrator to manage messages.');
+    const res = await backendAdminMarkMessageRead(id);
+    if (!res?.success) throw new Error('The message could not be marked as read.');
+  }
+
+  static async deleteAdminMessage(id: string): Promise<void> {
+    if (!getAuthToken()) throw new Error('Please sign in as an administrator to manage messages.');
+    const res = await backendAdminDeleteMessage(id);
+    if (!res?.success) throw new Error('The message could not be deleted.');
+  }
+
+  static async getAdminSystemStatus(): Promise<any> {
+    if (!getAuthToken()) throw new Error('Please sign in as an administrator to view system status.');
+    const res = await backendAdminGetSystemStatus();
+    if (!res?.success || !res.system) throw new Error('Could not load administrator system status.');
+    return res.system;
   }
 
   static async getIntelligenceData() {
