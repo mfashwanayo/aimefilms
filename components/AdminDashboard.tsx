@@ -103,6 +103,10 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
   }), [messages, messageSearch, messageReadFilter]);
 
   const unreadMessageCount = useMemo(() => messages.filter(message => !message.isRead).length, [messages]);
+  const totalCatalogMovies = Object.values(stats?.brandStats || {}).reduce((sum: number, item: any) => sum + Number(item?.movies || 0), 0);
+  const activeUserCount = Number(systemInfo?.counts?.users ?? 0);
+  const totalBrandViews = Object.values(stats?.brandStats || {}).reduce((sum: number, item: any) => sum + Number(item?.views || 0), 0);
+  const topMovieViewMaximum = Math.max(1, ...(stats?.topMovies || []).map((movie: any) => Number(movie.views || 0)));
 
   useEffect(() => {
     setCatalogueFilter(brand);
@@ -681,71 +685,119 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
             ) : (
               <>
                 {activeTab === 'analytics' && stats && (
-                  <div className="space-y-10">
-                    {/* Stats Grid */}
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                      <div className="bg-white/5 border border-white/10 p-8 rounded-[2.5rem] space-y-4">
-                        <div className="flex justify-between items-center">
-                          <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">AimeFilms</p>
-                          <span className="text-red-500 font-bold text-xs">{stats.brandStats.aimefilms.movies} Assets</span>
-                        </div>
-                        <p className="text-4xl font-black italic text-red-600">{stats.brandStats.aimefilms.views} Views</p>
+                  <div className="space-y-6">
+                    <div className="flex flex-wrap items-end justify-between gap-3">
+                      <div>
+                        <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-indigo-300">Overview</p>
+                        <h3 className="mt-1 text-xl font-semibold text-white">Streaming performance</h3>
+                        <p className="mt-1 text-xs text-slate-400">Live totals from the AimeFilms database</p>
                       </div>
-                      <div className="bg-white/5 border border-white/10 p-8 rounded-[2.5rem] space-y-4">
-                        <div className="flex justify-between items-center">
-                          <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">FilmsNyarwanda</p>
-                          <span className="text-blue-500 font-bold text-xs">{stats.brandStats.filmsnyarwanda.movies} Assets</span>
-                        </div>
-                        <p className="text-4xl font-black italic text-blue-500">{stats.brandStats.filmsnyarwanda.views} Views</p>
-                      </div>
-                      <div className="bg-white/5 border border-white/10 p-8 rounded-[2.5rem] space-y-4">
-                        <div className="flex justify-between items-center">
-                          <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">PrinceFilms</p>
-                          <span className="text-purple-500 font-bold text-xs">{stats.brandStats.princefilms.movies} Assets</span>
-                        </div>
-                        <p className="text-4xl font-black italic text-purple-500">{stats.brandStats.princefilms.views} Views</p>
-                      </div>
+                      <button type="button" onClick={loadData} className="inline-flex items-center gap-2 rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-200 transition hover:bg-slate-700">
+                        <Activity size={14} /> Refresh metrics
+                      </button>
                     </div>
 
-                    {/* Most Viewed Films */}
-                    <div className="space-y-6">
-                      <h3 className="text-xl font-black uppercase italic tracking-tight">Most Viewed Content (Zarebwe Cyane)</h3>
-                      <div className="grid grid-cols-1 gap-4">
-                        {stats.topMovies.map((movie: any, idx: number) => (
-                          <div key={movie.id} className="bg-white/5 border border-white/10 p-6 rounded-2xl flex items-center justify-between group hover:bg-white/[0.08] transition-all">
-                            <div className="flex items-center gap-6">
-                              <div className={`w-10 h-10 bg-black rounded-lg flex items-center justify-center font-black ${currentBrand.text} border border-${currentBrand.text.replace('text-', '')}/30`}>
-                                {idx + 1}
-                              </div>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                      {[
+                        { label: 'Total streams', value: Number(stats.totalViews || 0).toLocaleString(), note: 'Tracked playback views', icon: Activity, color: 'text-cyan-300', tint: 'bg-cyan-400/10' },
+                        { label: 'Content library', value: totalCatalogMovies.toLocaleString(), note: 'Across all three brands', icon: Clapperboard, color: 'text-violet-300', tint: 'bg-violet-400/10' },
+                        { label: 'Registered users', value: activeUserCount.toLocaleString(), note: 'Accounts in the database', icon: Users, color: 'text-emerald-300', tint: 'bg-emerald-400/10' },
+                        { label: 'Unread feedback', value: Number(systemInfo?.counts?.unreadMessages ?? unreadMessageCount).toLocaleString(), note: 'Messages awaiting review', icon: MessageSquare, color: 'text-amber-300', tint: 'bg-amber-400/10' },
+                      ].map(metric => {
+                        const MetricIcon = metric.icon;
+                        return (
+                          <div key={metric.label} className="rounded-xl border border-slate-700 bg-[#172235] p-4 shadow-lg shadow-black/10">
+                            <div className="flex items-start justify-between gap-3">
                               <div>
-                                <p className="font-black italic text-lg">{movie.name}</p>
-                                <p className="text-[10px] text-gray-500 font-bold uppercase">Rating: {movie.rating} • Engagement: {movie.engagement}%</p>
+                                <p className="text-[11px] font-medium text-slate-400">{metric.label}</p>
+                                <p className="mt-2 text-2xl font-semibold tracking-tight text-white">{metric.value}</p>
                               </div>
+                              <div className={`rounded-lg p-2 ${metric.tint} ${metric.color}`}><MetricIcon size={17} /></div>
                             </div>
-                            <div className="text-right">
-                              <p className="text-2xl font-black italic text-white">{movie.views}</p>
-                              <p className="text-[10px] text-gray-500 font-bold uppercase">Total Views</p>
-                            </div>
+                            <p className="mt-3 text-[10px] text-slate-500">{metric.note}</p>
                           </div>
-                        ))}
-                      </div>
+                        );
+                      })}
                     </div>
 
-                    {/* Recent Activity Summary */}
-                    <div className="space-y-6">
-                      <h3 className="text-xl font-black uppercase italic tracking-tight">Recent System Pulses</h3>
-                      <div className="bg-white/5 border border-white/10 rounded-[2rem] overflow-hidden">
-                        {stats.recentActivity.slice(0, 5).map((log: any) => (
-                          <div key={log.id} className="border-b border-white/5 p-6 flex items-center justify-between last:border-0">
-                            <div className="flex items-center gap-4">
-                              <span className="text-xs font-black uppercase tracking-widest px-3 py-1 bg-white/10 rounded-full">{log.type}</span>
-                              <p className="text-sm font-medium text-gray-300">{log.details || log.movieId}</p>
+                    <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1.4fr_1fr]">
+                      <section className="overflow-hidden rounded-xl border border-slate-700 bg-[#172235]">
+                        <div className="flex items-center justify-between border-b border-slate-700 px-5 py-4">
+                          <div>
+                            <h4 className="text-sm font-semibold text-white">Most viewed content</h4>
+                            <p className="mt-1 text-[10px] text-slate-500">Top films ranked by recorded views</p>
+                          </div>
+                          <button type="button" onClick={() => setActiveTab('movies')} className="text-[11px] font-semibold text-indigo-300 hover:text-indigo-200">Manage films</button>
+                        </div>
+                        <div className="divide-y divide-slate-700/70">
+                          {(stats.topMovies || []).slice(0, 6).map((movie: any, index: number) => (
+                            <div key={movie.id} className="flex items-center gap-3 px-5 py-3">
+                              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-slate-800 text-[10px] font-bold text-slate-400">{index + 1}</span>
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center justify-between gap-3">
+                                  <p className="truncate text-xs font-semibold text-slate-100">{movie.name}</p>
+                                  <span className="shrink-0 text-[10px] tabular-nums text-slate-400">{Number(movie.views || 0).toLocaleString()} views</span>
+                                </div>
+                                <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-800">
+                                  <div className="h-full rounded-full bg-indigo-500" style={{ width: `${Math.max(3, Math.round((Number(movie.views || 0) / topMovieViewMaximum) * 100))}%` }} />
+                                </div>
+                              </div>
                             </div>
-                            <span className="text-[10px] font-mono text-gray-600">{new Date(log.timestamp).toLocaleTimeString()}</span>
+                          ))}
+                          {(!stats.topMovies || stats.topMovies.length === 0) && <p className="px-5 py-10 text-center text-xs text-slate-500">No view activity recorded yet.</p>}
+                        </div>
+                      </section>
+
+                      <section className="rounded-xl border border-slate-700 bg-[#172235] p-5">
+                        <div className="mb-5">
+                          <h4 className="text-sm font-semibold text-white">Brand performance</h4>
+                          <p className="mt-1 text-[10px] text-slate-500">Catalogue size and share of tracked views</p>
+                        </div>
+                        <div className="space-y-5">
+                          {[
+                            { id: 'aimefilms', name: 'AimeFilms', views: stats.brandStats?.aimefilms?.views || 0, movies: stats.brandStats?.aimefilms?.movies || 0, color: 'bg-rose-500' },
+                            { id: 'filmsnyarwanda', name: 'FilmsNyarwanda', views: stats.brandStats?.filmsnyarwanda?.views || 0, movies: stats.brandStats?.filmsnyarwanda?.movies || 0, color: 'bg-amber-400' },
+                            { id: 'princefilms', name: 'PrinceFilms', views: stats.brandStats?.princefilms?.views || 0, movies: stats.brandStats?.princefilms?.movies || 0, color: 'bg-violet-500' },
+                          ].map(brandItem => (
+                            <div key={brandItem.id}>
+                              <div className="mb-2 flex items-center justify-between gap-3">
+                                <span className="text-xs font-medium text-slate-200">{brandItem.name}</span>
+                                <span className="text-[10px] text-slate-400">{Number(brandItem.movies).toLocaleString()} films · {Number(brandItem.views).toLocaleString()} views</span>
+                              </div>
+                              <div className="h-2 overflow-hidden rounded-full bg-slate-800">
+                                <div className={`h-full rounded-full ${brandItem.color}`} style={{ width: `${totalBrandViews > 0 ? Math.max(2, (Number(brandItem.views) / totalBrandViews) * 100) : 0}%` }} />
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="mt-6 rounded-lg border border-slate-700 bg-slate-900/50 p-3">
+                          <p className="text-[10px] uppercase tracking-wider text-slate-500">Tracked views across brands</p>
+                          <p className="mt-1 text-lg font-semibold text-white">{totalBrandViews.toLocaleString()}</p>
+                        </div>
+                      </section>
+                    </div>
+
+                    <section className="overflow-hidden rounded-xl border border-slate-700 bg-[#172235]">
+                      <div className="flex items-center justify-between border-b border-slate-700 px-5 py-4">
+                        <div>
+                          <h4 className="text-sm font-semibold text-white">Recent system activity</h4>
+                          <p className="mt-1 text-[10px] text-slate-500">Latest database events</p>
+                        </div>
+                        <button type="button" onClick={() => setActiveTab('history')} className="text-[11px] font-semibold text-indigo-300 hover:text-indigo-200">View event log</button>
+                      </div>
+                      <div className="divide-y divide-slate-700/70">
+                        {(stats.recentActivity || []).slice(0, 5).map((log: any) => (
+                          <div key={log.id} className="flex flex-wrap items-center justify-between gap-2 px-5 py-3">
+                            <div className="flex min-w-0 items-center gap-3">
+                              <span className="rounded-md bg-slate-800 px-2 py-1 text-[9px] font-bold uppercase tracking-wide text-slate-300">{log.type}</span>
+                              <p className="truncate text-xs text-slate-300">{log.details || log.movieId}</p>
+                            </div>
+                            <span className="text-[10px] text-slate-500">{new Date(log.timestamp).toLocaleString()}</span>
                           </div>
                         ))}
+                        {(!stats.recentActivity || stats.recentActivity.length === 0) && <p className="px-5 py-8 text-center text-xs text-slate-500">No recent activity.</p>}
                       </div>
-                    </div>
+                    </section>
                   </div>
                 )}
 
