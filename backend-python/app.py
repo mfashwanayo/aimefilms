@@ -143,12 +143,8 @@ def init_db() -> None:
         "ALTER TABLE movies ADD COLUMN IF NOT EXISTS subtitle_tracks TEXT NOT NULL DEFAULT '[]'",
         "ALTER TABLE movies ADD COLUMN IF NOT EXISTS audio_tracks TEXT NOT NULL DEFAULT '[]'",
         "CREATE INDEX IF NOT EXISTS movies_ordinal_idx ON movies (ordinal DESC)",
-        # Index the access patterns used by catalogue, inbox, audit and user-list queries.
         "CREATE INDEX IF NOT EXISTS movies_public_section_ordinal_idx ON movies (is_hidden, section, ordinal DESC)",
         "CREATE INDEX IF NOT EXISTS movies_name_lower_idx ON movies (lower(name))",
-        "CREATE INDEX IF NOT EXISTS messages_recipient_timestamp_idx ON messages (lower(to_email), timestamp DESC)",
-        "CREATE INDEX IF NOT EXISTS logs_timestamp_idx ON logs (timestamp DESC)",
-        "CREATE INDEX IF NOT EXISTS user_lists_owner_type_created_idx ON user_lists (email, list_type, created_at)",
         """CREATE TABLE IF NOT EXISTS views (
             movie_id TEXT PRIMARY KEY, view_count BIGINT NOT NULL DEFAULT 0, updated_at TEXT NOT NULL
         )""",
@@ -164,6 +160,10 @@ def init_db() -> None:
             email TEXT NOT NULL, list_type TEXT NOT NULL, movie_id TEXT NOT NULL,
             created_at TEXT NOT NULL, PRIMARY KEY (email, list_type, movie_id)
         )""",
+        # Create cross-table indexes only after every target table exists.
+        "CREATE INDEX IF NOT EXISTS messages_recipient_timestamp_idx ON messages (lower(to_email), timestamp DESC)",
+        "CREATE INDEX IF NOT EXISTS logs_timestamp_idx ON logs (timestamp DESC)",
+        "CREATE INDEX IF NOT EXISTS user_lists_owner_type_created_idx ON user_lists (email, list_type, created_at)",
     ]
     with db() as connection:
         for statement in schema_statements:
