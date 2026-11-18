@@ -629,6 +629,7 @@ async def create_video_upload(request: Request) -> dict[str, Any]:
 
     return {
         "success": True,
+        "storageMode": "supabase",
         "bucket": SUPABASE_VIDEO_BUCKET,
         "path": object_path,
         "signedToken": signed_token,
@@ -1006,13 +1007,23 @@ def delete_movie(movie_id: str, request: Request) -> dict[str, Any]:
     administrator = admin_user(request)
     with db() as connection:
         movie = connection.execute(
-            "SELECT id, name, video_url, full_movie_url FROM movies WHERE id = %s",
+            "SELECT id, name, video_url, full_movie_url, subtitle_tracks, audio_tracks FROM movies WHERE id = %s",
             (movie_id,),
         ).fetchone()
         if not movie:
             raise HTTPException(status_code=404, detail="Movie not found.")
-        # Preserve the row when Storage cannot delete the managed video objects.
-        remove_managed_video_objects([movie.get("video_url") or "", movie.get("full_movie_url") or ""])
+        track_urls = [
+            track.get("url")
+            for field in ("subtitle_tracks", "audio_tracks")
+            for track in parse_json(movie.get(field), [])
+            if isinstance(track, dict) and track.get("url")
+        ]
+        # Preserve the database record if a managed remote object cannot be removed.
+        remove_managed_video_objects([
+            movie.get("video_url") or "",
+            movie.get("full_movie_url") or "",
+            *track_urls,
+        ])
         connection.execute("DELETE FROM movies WHERE id = %s", (movie_id,))
         connection.execute("DELETE FROM views WHERE movie_id = %s", (movie_id,))
         connection.execute("DELETE FROM user_lists WHERE movie_id = %s", (movie_id,))
@@ -1077,16 +1088,20 @@ def admin_system_status(request: Request) -> dict[str, Any]:
             "unreadMessages": connection.execute("SELECT COUNT(*) AS total FROM messages WHERE is_read = 0").fetchone()["total"],
             "views": connection.execute("SELECT COALESCE(SUM(view_count), 0) AS total FROM views").fetchone()["total"],
         }
-    storage_ready = bool(SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY and SUPABASE_PUBLISHABLE_KEY)
+    storage_ready = VIDEO_STORAGE_DRIVER == "local" or bool(
+        SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY and SUPABASE_PUBLISHABLE_KEY
+    )
     return {
         "success": True,
         "system": {
             "api": {"name": "AimeFilms API", "version": app.version, "status": "online"},
-            "database": {"status": "connected", "provider": "Supabase PostgreSQL" if DATABASE_URL else "PostgreSQL"},
+            "database": {"status": "connected", "provider": "Supabase PostgreSQL"},
             "storage": {
                 "status": "configured" if storage_ready else "not_configured",
-                "provider": "Supabase Storage",
-                "bucket": SUPABASE_VIDEO_BUCKET,
+                "driver": VIDEO_STORAGE_DRIVER,
+                "provider": "Local backend filesystem" if VIDEO_STORAGE_DRIVER == "local" else "Supabase Storage",
+                "bucket": SUPABASE_VIDEO_BUCKET if VIDEO_STORAGE_DRIVER == "supabase" else None,
+                "directory": "backend-python/storage/public" if VIDEO_STORAGE_DRIVER == "local" else None,
                 "maxVideoUploadMB": MAX_VIDEO_UPLOAD_MB,
             },
             "frontendOrigins": FRONTEND_ORIGINS,
