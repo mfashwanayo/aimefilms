@@ -197,14 +197,18 @@ def record_log(connection: psycopg.Connection, event_type: str, details: str, em
 
 
 def remove_managed_video_objects(public_urls: list[str]) -> None:
-    """Remove only video objects owned by this application's configured Storage bucket."""
+    """Remove only files stored by this application in local or Supabase storage."""
+    object_paths: list[str] = []
     bucket_prefix = f"/storage/v1/object/public/{SUPABASE_VIDEO_BUCKET}/"
     base = urlparse(SUPABASE_URL) if SUPABASE_URL else None
-    object_paths: list[str] = []
+
     for value in public_urls:
         if not value:
             continue
-        parsed = urlparse(str(value))
+        value = str(value)
+        if delete_local_media_url(value):
+            continue
+        parsed = urlparse(value)
         if not parsed.path.startswith(bucket_prefix):
             continue
         if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY or base is None:
@@ -238,7 +242,7 @@ def remove_managed_video_objects(public_urls: list[str]) -> None:
         raise HTTPException(status_code=502, detail="Supabase Storage could not delete the video's files. The movie was not deleted.")
 
 
-async def json_body(request: Request) -> dict[str, Any]:
+def json_body(request: Request) -> dict[str, Any]:
     try:
         value = await request.json()
         return value if isinstance(value, dict) else {}
@@ -558,16 +562,31 @@ async def create_video_upload(request: Request) -> dict[str, Any]:
     if content_type not in ("", "application/octet-stream", expected_content_type):
         raise HTTPException(status_code=415, detail="Video content type does not match its file extension.")
 
+    with db() as connection:
+        movie = connection.execute("SELECT id FROM movies WHERE id = %s", (movie_id,)).fetchone()
+    if not movie:
+        raise HTTPException(status_code=404, detail="Save the movie metadata before uploading its video.")
+
+    if VIDEO_STORAGE_DRIVER == "local":
+        with db() as connection:
+            record_log(connection, "VIDEO_UPLOAD_START", f"Prepared local video upload for movie {movie_id}", user["email"])
+        return {
+            "success": True,
+            "storageMode": "local",
+            "movieId": movie_id,
+            "field": field,
+            "sizeBytes": size_bytes,
+            "maxFileSizeBytes": MAX_VIDEO_UPLOAD_BYTES,
+        }
+
     if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY or not SUPABASE_PUBLISHABLE_KEY:
         raise HTTPException(
             status_code=503,
-            detail="Video storage requires SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, and SUPABASE_PUBLISHABLE_KEY.",
+            detail="Supabase video storage requires SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, and SUPABASE_PUBLISHABLE_KEY.",
         )
     if not SUPABASE_URL.startswith("https://"):
         raise HTTPException(status_code=503, detail="SUPABASE_URL must be an HTTPS Supabase project URL.")
 
-    with db() as connection:
-        movie = connection.execute("SELECT id FROM movies WHERE id = %s", (movie_id,)).fetchone()
     if not movie:
         raise HTTPException(status_code=404, detail="Save the movie metadata before uploading its video.")
 
@@ -683,17 +702,8 @@ def upload_video(
     field: str = Form(default="fullMovieUrl", description="Either fullMovieUrl or videoUrl"),
     bearer_credentials: Any = Depends(video_upload_bearer),
 ) -> dict[str, Any]:
-    """Upload a video to Supabase Storage. Only authenticated admins may upload."""
+    """Receive local uploads or relay legacy single-request uploads to Supabase."""
     user = admin_user(request)
-
-    if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
-        raise HTTPException(
-            status_code=503,
-            detail="Video storage is not configured. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY on the backend.",
-        )
-    if not SUPABASE_URL.startswith("https://"):
-        raise HTTPException(status_code=503, detail="SUPABASE_URL must be an HTTPS Supabase project URL.")
-
     field_to_column = {"videoUrl": "video_url", "fullMovieUrl": "full_movie_url"}
     if field not in field_to_column:
         raise HTTPException(status_code=422, detail="field must be videoUrl or fullMovieUrl.")
@@ -726,14 +736,52 @@ def upload_video(
     if file_size <= 0:
         raise HTTPException(status_code=422, detail="The uploaded video is empty.")
     if file_size > MAX_VIDEO_UPLOAD_BYTES:
-        raise HTTPException(
-            status_code=413,
-            detail=f"Video is too large. The configured limit is {MAX_VIDEO_UPLOAD_MB} MB.",
-        )
+        raise HTTPException(status_code=413, detail=f"Video is too large. The configured limit is {MAX_VIDEO_UPLOAD_MB} MB.")
 
-    # Use a generated path rather than trusting a user-supplied filename.
-    folder = re.sub(r"[^A-Za-z0-9_-]", "", movie_id or "")[:80] or "unassigned"
-    object_path = f"{folder}/{uuid.uuid4().hex}{extension}"
+    safe_movie_id = re.sub(r"[^A-Za-z0-9_-]", "", movie_id or "")[:80] or "unassigned"
+
+    if VIDEO_STORAGE_DRIVER == "local":
+        try:
+            object_path, stored_size = store_local_file(
+                file.file,
+                f"films/{safe_movie_id}",
+                extension,
+                MAX_VIDEO_UPLOAD_BYTES,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=413, detail=str(exc))
+        except OSError:
+            logger.exception("Could not save local video upload for movie %s", movie_id)
+            raise HTTPException(status_code=507, detail="The backend could not save this video to local storage. Check disk space and permissions.")
+
+        public_url = local_media_url(str(request.base_url), object_path)
+        response: dict[str, Any] = {
+            "success": True,
+            "storageMode": "local",
+            "path": object_path,
+            "url": public_url,
+            "sizeBytes": stored_size,
+            "contentType": expected_content_type,
+        }
+        if movie_id:
+            with db() as connection:
+                connection.execute(
+                    f'UPDATE movies SET "{field_to_column[field]}" = %s WHERE id = %s',
+                    (public_url, movie_id),
+                )
+                record_log(connection, "VIDEO_UPLOAD", f"Saved local video to {object_path} for movie {movie_id}", user["email"])
+            response.update({"movieId": movie_id, "field": field, "movieUrlUpdated": True})
+        else:
+            response["movieUrlUpdated"] = False
+            response["message"] = "Video saved. Attach the returned URL to a movie record when ready."
+        return response
+
+    if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+        raise HTTPException(status_code=503, detail="Supabase Storage is not configured.")
+    if not SUPABASE_URL.startswith("https://"):
+        raise HTTPException(status_code=503, detail="SUPABASE_URL must be an HTTPS Supabase project URL.")
+
+    object_path = f"films/{safe_movie_id}/{uuid.uuid4().hex}{extension}"
     bucket_segment = quote(SUPABASE_VIDEO_BUCKET, safe="")
     object_segment = quote(object_path, safe="/")
     upload_url = f"{SUPABASE_URL}/storage/v1/object/{bucket_segment}/{object_segment}"
@@ -744,53 +792,33 @@ def upload_video(
         "Cache-Control": "3600",
         "x-upsert": "false",
     }
-
     try:
         file.file.seek(0)
-        storage_response = requests.post(
-            upload_url,
-            data=file.file,
-            headers=headers,
-            timeout=(15, 300),
-        )
+        storage_response = requests.post(upload_url, data=file.file, headers=headers, timeout=(15, 300))
     except requests.RequestException:
         raise HTTPException(status_code=502, detail="Could not reach Supabase Storage. Check the backend storage settings and try again.")
-
     if not storage_response.ok:
         if storage_response.status_code == 413:
             raise HTTPException(status_code=413, detail="Supabase Storage rejected the video because it exceeds the project's upload limit.")
         if storage_response.status_code == 409:
             raise HTTPException(status_code=409, detail="A video already exists at this storage path. Please retry the upload.")
-        raise HTTPException(
-            status_code=502,
-            detail="Supabase Storage rejected the video. Check the storage bucket and server-side key configuration.",
-        )
+        raise HTTPException(status_code=502, detail="Supabase Storage rejected the video. Check the storage bucket and server-side key configuration.")
 
     public_url = f"{SUPABASE_URL}/storage/v1/object/public/{bucket_segment}/{object_segment}"
-    response: dict[str, Any] = {
-        "success": True,
-        "bucket": SUPABASE_VIDEO_BUCKET,
-        "path": object_path,
-        "url": public_url,
-        "sizeBytes": file_size,
-        "contentType": expected_content_type,
+    response = {
+        "success": True, "storageMode": "supabase", "bucket": SUPABASE_VIDEO_BUCKET,
+        "path": object_path, "url": public_url, "sizeBytes": file_size, "contentType": expected_content_type,
     }
-
     if movie_id:
-        target_column = field_to_column[field]
         with db() as connection:
             connection.execute(
-                f'UPDATE movies SET "{target_column}" = %s WHERE id = %s',
+                f'UPDATE movies SET "{field_to_column[field]}" = %s WHERE id = %s',
                 (public_url, movie_id),
             )
             record_log(connection, "VIDEO_UPLOAD", f"Uploaded video to {field} for movie {movie_id}", user["email"])
-        response["movieId"] = movie_id
-        response["field"] = field
-        response["movieUrlUpdated"] = True
+        response.update({"movieId": movie_id, "field": field, "movieUrlUpdated": True})
     else:
-        response["movieUrlUpdated"] = False
-        response["message"] = "Video uploaded. Save the returned URL in the movie's videoUrl or fullMovieUrl field."
-
+        response.update({"movieUrlUpdated": False, "message": "Video uploaded. Save the returned URL in the movie record."})
     return response
 
 
