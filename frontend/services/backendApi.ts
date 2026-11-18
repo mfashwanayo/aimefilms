@@ -69,15 +69,16 @@ export async function backendAdminAddMovie(movie: Partial<StreamingService>): Pr
 
 type SignedVideoUpload = {
     success: boolean;
-    bucket: string;
+    storageMode?: 'local' | 'supabase';
+    bucket?: string;
     path: string;
-    signedToken: string;
-    uploadEndpoint: string;
-    publicUrl: string;
-    publishableKey: string;
+    signedToken?: string;
+    uploadEndpoint?: string;
+    publicUrl?: string;
+    publishableKey?: string;
     sizeBytes: number;
-    maxFileSizeBytes: number;
-    chunkSizeBytes: number;
+    maxFileSizeBytes?: number;
+    chunkSizeBytes?: number;
     movieId: string;
     field: 'videoUrl' | 'fullMovieUrl';
 };
@@ -98,10 +99,55 @@ function readableUploadError(responseText: string, fallback: string): string {
     }
 }
 
+function uploadVideoToLocalBackend(
+    file: File,
+    movieId: string,
+    field: 'videoUrl' | 'fullMovieUrl',
+    onProgress: (percent: number) => void,
+): Promise<{ url: string; path: string }> {
+    return new Promise((resolve, reject) => {
+        const token = getAuthToken();
+        if (!token) {
+            reject(new Error('Please sign in as an administrator before uploading a video.'));
+            return;
+        }
+
+        const form = new FormData();
+        form.append('file', file, file.name);
+        form.append('movie_id', movieId);
+        form.append('field', field);
+
+        const base = API_BASE_URL || 'http://localhost:8001';
+        const request = new XMLHttpRequest();
+        request.open('POST', `${base}/api/admin/videos/upload`);
+        request.setRequestHeader('Authorization', `Bearer ${token}`);
+        request.upload.onprogress = event => {
+            if (event.lengthComputable && event.total > 0) {
+                onProgress(Math.min(99, Math.round((event.loaded / event.total) * 100)));
+            }
+        };
+        request.onerror = () => reject(new Error('The local backend could not be reached. Check that FastAPI is running on port 8001.'));
+        request.ontimeout = () => reject(new Error('The upload timed out. Check the local backend and retry.'));
+        request.onload = () => {
+            const body = (() => {
+                try { return request.responseText ? JSON.parse(request.responseText) : {}; }
+                catch { return {}; }
+            })();
+            if (request.status < 200 || request.status >= 300 || !body?.success || !body?.url) {
+                reject(new Error(body?.message || body?.detail || `Video upload failed (HTTP ${request.status || 'network error'}).`));
+                return;
+            }
+            onProgress(100);
+            resolve({ url: body.url, path: body.path || '' });
+        };
+        request.send(form);
+    });
+}
+
 /**
- * Sends large video files directly from the administrator's browser to Supabase
- * Storage with 6 MiB TUS chunks. FastAPI only issues a short-lived signed token
- * and saves metadata, so the multi-GB video never passes through Render.
+ * Selects the configured storage driver. Local development streams a multipart
+ * upload to FastAPI's local folders; deployed Supabase mode retains resumable
+ * TUS chunks so multi-GB videos do not pass through the Render web process.
  */
 export async function backendUploadVideo(
     file: File,
@@ -109,7 +155,7 @@ export async function backendUploadVideo(
     field: 'videoUrl' | 'fullMovieUrl',
     onProgress: (percent: number) => void,
 ): Promise<{ url: string; path: string }> {
-    const maxBytes = 3_900_000_000; // 3.9 decimal GB; actual Supabase plan limits still apply.
+    const maxBytes = 3_900_000_000;
     if (file.size <= 0 || file.size > maxBytes) {
         throw new Error('Video must be greater than 0 bytes and no larger than 3.9 GB.');
     }
@@ -136,6 +182,13 @@ export async function backendUploadVideo(
             field,
         }),
     });
+
+    if (signed.storageMode === 'local') {
+        return uploadVideoToLocalBackend(file, movieId, field, onProgress);
+    }
+    if (!signed.bucket || !signed.signedToken || !signed.uploadEndpoint || !signed.publishableKey) {
+        throw new Error('The backend returned an incomplete Supabase upload configuration.');
+    }
 
     const metadata = [
         ['bucketName', signed.bucket],
@@ -216,13 +269,8 @@ export async function backendUploadVideo(
             }
 
             if (!uploadedChunk && attempt < 4) {
-                // Recover the server's true upload offset after a network timeout,
-                // avoiding duplicate or skipped bytes during the retry.
                 try {
-                    const headResponse = await fetch(uploadUrl, {
-                        method: 'HEAD',
-                        headers: authHeaders,
-                    });
+                    const headResponse = await fetch(uploadUrl, { method: 'HEAD', headers: authHeaders });
                     if (headResponse.ok) {
                         const serverOffset = Number(headResponse.headers.get('Upload-Offset'));
                         if (Number.isFinite(serverOffset) && serverOffset >= 0 && serverOffset <= file.size) {
@@ -231,7 +279,7 @@ export async function backendUploadVideo(
                         }
                     }
                 } catch {
-                    // The next attempt will retry this chunk.
+                    // Retry the same chunk if the server's offset cannot be read.
                 }
                 if (!uploadedChunk) await new Promise(resolve => setTimeout(resolve, Math.min(1000 * (attempt + 1), 5000)));
             }
@@ -242,12 +290,7 @@ export async function backendUploadVideo(
 
     const completed = await apiFetch<{ success: boolean; url: string; path: string }>('/api/admin/videos/complete-upload', {
         method: 'POST',
-        body: JSON.stringify({
-            movieId,
-            field,
-            path: signed.path,
-            sizeBytes: file.size,
-        }),
+        body: JSON.stringify({ movieId, field, path: signed.path, sizeBytes: file.size }),
     });
     if (!completed?.success || !completed.url) {
         throw new Error('Video uploaded, but saving its URL to the movie database failed. Retry the save step.');
