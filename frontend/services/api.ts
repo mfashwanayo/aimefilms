@@ -80,19 +80,43 @@ async function backendUpdateProfile(name: string, avatar: string): Promise<any> 
   return apiFetch<any>('/api/user/profile', { method: 'PUT', body: JSON.stringify({ name, avatar }) });
 }
 
+function readStore(key: string): string | null {
+  try { return typeof window === 'undefined' ? null : window.localStorage.getItem(key); }
+  catch { return null; }
+}
+
+function writeStore(key: string, value: string): void {
+  try { if (typeof window !== 'undefined') window.localStorage.setItem(key, value); }
+  catch { /* Browser storage is optional; API data remains authoritative. */ }
+}
+
+function removeStore(key: string): void {
+  try { if (typeof window !== 'undefined') window.localStorage.removeItem(key); }
+  catch { /* Ignore restricted browser storage. */ }
+}
+
+function parseStored<T>(key: string, raw: string | null, fallback: T): T {
+  if (!raw) return fallback;
+  try { return JSON.parse(raw) as T; }
+  catch {
+    removeStore(key);
+    return fallback;
+  }
+}
+
 export class AimeFilmsAPI {
   private static getDB(): StreamingService[] {
-    const stored = localStorage.getItem(DB_KEY);
+    const stored = readStore(DB_KEY);
     if (!stored) {
-      localStorage.setItem(DB_KEY, JSON.stringify(STREAMING_SERVICES));
+      writeStore(DB_KEY, JSON.stringify(STREAMING_SERVICES));
       return STREAMING_SERVICES;
     }
-    return JSON.parse(stored);
+    return parseStored<StreamingService[]>(DB_KEY, stored, STREAMING_SERVICES);
   }
 
   private static getAnalytics(): { views: Record<string, number>; logs: LogEntry[] } {
-    const stored = localStorage.getItem(ANALYTICS_KEY);
-    return stored ? JSON.parse(stored) : { views: {}, logs: [] };
+    const stored = readStore(ANALYTICS_KEY);
+    return parseStored(ANALYTICS_KEY, stored, { views: {}, logs: [] });
   }
 
   // --- VIEW COUNTS ---
@@ -104,7 +128,7 @@ export class AimeFilmsAPI {
   static fetchWatchlist(email: string | undefined): string[] {
     if (!email) return [];
     try {
-      return JSON.parse(localStorage.getItem(`aimefilms_watchlist_${email.toLowerCase()}`) || '[]');
+      return JSON.parse(readStore(`aimefilms_watchlist_${email.toLowerCase()}`) || '[]');
     } catch {
       return [];
     }
@@ -112,7 +136,7 @@ export class AimeFilmsAPI {
 
   static syncWatchlist(email: string | undefined, ids: string[]) {
     if (!email) return;
-    localStorage.setItem(`aimefilms_watchlist_${email.toLowerCase()}`, JSON.stringify(ids));
+    writeStore(`aimefilms_watchlist_${email.toLowerCase()}`, JSON.stringify(ids));
     if (getAuthToken()) {
       backendSetWatchlist(ids).catch(() => { });
     }
@@ -122,7 +146,7 @@ export class AimeFilmsAPI {
   static fetchContinueWatching(email: string | undefined): string[] {
     if (!email) return [];
     try {
-      return JSON.parse(localStorage.getItem(`aimefilms_continue_${email.toLowerCase()}`) || '[]');
+      return JSON.parse(readStore(`aimefilms_continue_${email.toLowerCase()}`) || '[]');
     } catch {
       return [];
     }
@@ -135,13 +159,13 @@ export class AimeFilmsAPI {
 
     const analytics = this.getAnalytics();
     analytics.views[movieId] = (analytics.views[movieId] || 0) + 1;
-    localStorage.setItem(ANALYTICS_KEY, JSON.stringify(analytics));
+    writeStore(ANALYTICS_KEY, JSON.stringify(analytics));
 
     if (email) {
       const current = this.fetchContinueWatching(email);
       const filtered = current.filter(id => id !== movieId);
       const next = [movieId, ...filtered].slice(0, 10);
-      localStorage.setItem(`aimefilms_continue_${email.toLowerCase()}`, JSON.stringify(next));
+      writeStore(`aimefilms_continue_${email.toLowerCase()}`, JSON.stringify(next));
       if (getAuthToken()) {
         backendSetContinueWatching(next).catch(() => { });
       }
@@ -168,8 +192,8 @@ export class AimeFilmsAPI {
     } catch { /* fallback */ }
 
     await delay(API_LATENCY);
-    const stored = localStorage.getItem(INBOX_KEY);
-    const inbox: UserMessage[] = stored ? JSON.parse(stored) : [];
+    const stored = readStore(INBOX_KEY);
+    const inbox: UserMessage[] = parseStored<UserMessage[]>(INBOX_KEY, stored, []);
     inbox.unshift({
       id: Math.random().toString(36).substr(2, 9),
       toEmail: toEmail.toLowerCase(),
@@ -179,7 +203,7 @@ export class AimeFilmsAPI {
       timestamp: new Date().toISOString(),
       isRead: false
     });
-    localStorage.setItem(INBOX_KEY, JSON.stringify(inbox));
+    writeStore(INBOX_KEY, JSON.stringify(inbox));
     return true;
   }
 
@@ -192,9 +216,9 @@ export class AimeFilmsAPI {
     } catch { /* fallback */ }
 
     await delay(API_LATENCY);
-    const stored = localStorage.getItem(INBOX_KEY);
+    const stored = readStore(INBOX_KEY);
     if (!stored) return [];
-    const inbox: UserMessage[] = JSON.parse(stored);
+    const inbox: UserMessage[] = parseStored<UserMessage[]>(INBOX_KEY, stored, []);
     return inbox.filter(m => m.toEmail.toLowerCase() === email.toLowerCase());
   }
 
@@ -203,13 +227,13 @@ export class AimeFilmsAPI {
       await backendMarkMessageRead(messageId);
       return true;
     } catch { /* fallback */ }
-    const stored = localStorage.getItem(INBOX_KEY);
+    const stored = readStore(INBOX_KEY);
     if (!stored) return false;
     const inbox: UserMessage[] = JSON.parse(stored);
     const idx = inbox.findIndex(m => m.id === messageId);
     if (idx !== -1) {
       inbox[idx].isRead = true;
-      localStorage.setItem(INBOX_KEY, JSON.stringify(inbox));
+      writeStore(INBOX_KEY, JSON.stringify(inbox));
       return true;
     }
     return false;
@@ -220,11 +244,11 @@ export class AimeFilmsAPI {
       await backendDeleteMessage(messageId);
       return true;
     } catch { /* fallback */ }
-    const stored = localStorage.getItem(INBOX_KEY);
+    const stored = readStore(INBOX_KEY);
     if (!stored) return false;
     const inbox: UserMessage[] = JSON.parse(stored);
     const filtered = inbox.filter(m => m.id !== messageId);
-    localStorage.setItem(INBOX_KEY, JSON.stringify(filtered));
+    writeStore(INBOX_KEY, JSON.stringify(filtered));
     return true;
   }
 
@@ -238,7 +262,7 @@ export class AimeFilmsAPI {
       userEmail: email,
       timestamp: new Date().toISOString()
     });
-    localStorage.setItem(ANALYTICS_KEY, JSON.stringify(analytics));
+    writeStore(ANALYTICS_KEY, JSON.stringify(analytics));
   }
 
   static async getLogs(): Promise<LogEntry[]> {
@@ -336,12 +360,12 @@ export class AimeFilmsAPI {
   }
 
   private static getUsers(): (User & { password?: string })[] {
-    const stored = localStorage.getItem(USERS_KEY);
-    return stored ? JSON.parse(stored) : [];
+    const stored = readStore(USERS_KEY);
+    return parseStored<User[]>(USERS_KEY, stored, []);
   }
 
   private static saveUsers(users: any[]) {
-    localStorage.setItem(USERS_KEY, JSON.stringify(users));
+    writeStore(USERS_KEY, JSON.stringify(users));
   }
 
   static async getAllUsers(): Promise<User[]> {
@@ -360,9 +384,9 @@ export class AimeFilmsAPI {
 
   static async getUserPosts(email: string): Promise<UserPost[]> {
     await delay(API_LATENCY);
-    const stored = localStorage.getItem(GALLERY_KEY);
+    const stored = readStore(GALLERY_KEY);
     if (!stored) return [];
-    const gallery: UserPost[] = JSON.parse(stored);
+    const gallery: UserPost[] = parseStored<UserPost[]>(GALLERY_KEY, stored, []);
     return gallery.filter(p => p.userEmail.toLowerCase() === email.toLowerCase());
   }
 
@@ -388,7 +412,7 @@ export class AimeFilmsAPI {
   }
 
   static getSystemStatus(): string {
-    return localStorage.getItem(STATUS_KEY) || 'Active';
+    return readStore(STATUS_KEY) || 'Active';
   }
 
   // --- MOVIES PUBLIC ---
