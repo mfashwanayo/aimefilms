@@ -853,45 +853,111 @@ def fetch_tmdb_metadata(tmdb_id: str, request: Request) -> dict[str, Any]:
 
 
 @app.post("/api/admin/media-assets/upload")
-def upload_media_asset(request: Request, file: UploadFile = File(...), movie_id: str = Form(...), kind: str = Form(...), language: str = Form(default="English")) -> dict[str, Any]:
+def upload_media_asset(
+    request: Request,
+    file: UploadFile = File(...),
+    movie_id: str = Form(...),
+    kind: str = Form(...),
+    language: str = Form(default="English"),
+) -> dict[str, Any]:
     """Upload and persist a subtitle or alternate-audio file."""
     user = admin_user(request)
-    if kind not in ("subtitle", "audio"): raise HTTPException(status_code=422, detail="kind must be subtitle or audio.")
-    if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY: raise HTTPException(status_code=503, detail="Media storage is not configured on the backend.")
+    if kind not in ("subtitle", "audio"):
+        raise HTTPException(status_code=422, detail="kind must be subtitle or audio.")
+
     movie_id = movie_id.strip()
-    if not movie_id or len(movie_id) > 128: raise HTTPException(status_code=422, detail="A valid movie_id is required.")
-    original_name = Path(file.filename or "").name; extension = Path(original_name).suffix.lower()
-    subtitle_types = {".srt": "text/plain", ".vtt": "text/vtt"}
-    audio_types = {".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".aac": "audio/aac", ".ogg": "audio/ogg", ".wav": "audio/wav", ".flac": "audio/flac"}
-    allowed_types = subtitle_types if kind == "subtitle" else audio_types; content_type = allowed_types.get(extension)
-    if not content_type: raise HTTPException(status_code=415, detail=f"Unsupported {kind} format. Supported files: {', '.join(sorted(allowed_types))}.")
-    try: file.file.seek(0, os.SEEK_END); file_size = file.file.tell(); file.file.seek(0)
-    except (OSError, ValueError): raise HTTPException(status_code=400, detail="Unable to read the uploaded file.")
-    if file_size <= 0 or file_size > 200_000_000: raise HTTPException(status_code=413, detail="Subtitle/audio files must be between 1 byte and 200 MB.")
-    with db() as connection: movie_exists = connection.execute("SELECT id FROM movies WHERE id = %s", (movie_id,)).fetchone()
-    if not movie_exists: raise HTTPException(status_code=404, detail="Movie not found. Save its details before uploading media tracks.")
-    safe_movie_id = re.sub(r"[^A-Za-z0-9_-]", "", movie_id)[:80] or "movie"
-    object_path = f"films/{safe_movie_id}/{kind}/{uuid.uuid4().hex}{extension}"
-    bucket_segment, object_segment = quote(SUPABASE_VIDEO_BUCKET, safe=""), quote(object_path, safe="/")
-    upload_url = f"{SUPABASE_URL}/storage/v1/object/{bucket_segment}/{object_segment}"
-    headers = {"apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}", "Content-Type": content_type, "Cache-Control": "3600", "x-upsert": "false"}
-    try: file.file.seek(0); storage_response = requests.post(upload_url, data=file.file, headers=headers, timeout=(15, 180))
-    except requests.RequestException: raise HTTPException(status_code=502, detail="Could not reach Supabase Storage for this media file.")
-    if not storage_response.ok:
-        if storage_response.status_code == 413: raise HTTPException(status_code=413, detail="Supabase Storage rejected the file because of the project's upload limit.")
-        raise HTTPException(status_code=502, detail="Supabase Storage rejected this file. Check the bucket and server-side key settings.")
-    public_url = f"{SUPABASE_URL}/storage/v1/object/public/{bucket_segment}/{object_segment}"
-    if kind == "subtitle" and extension == ".srt":
-        # Browser video players require WebVTT; convert SRT timings before uploading.
-        raise HTTPException(status_code=415, detail="Please convert SRT captions to WebVTT (.vtt) before upload for browser playback.")
-    track = {"language": (language or "English").strip()[:40], "url": public_url, "fileName": original_name, "path": object_path}
-    column = "subtitle_tracks" if kind == "subtitle" else "audio_tracks"
+    if not movie_id or len(movie_id) > 128:
+        raise HTTPException(status_code=422, detail="A valid movie_id is required.")
+
+    original_name = Path(file.filename or "").name
+    extension = Path(original_name).suffix.lower()
+    # Web players use WebVTT directly; SRT must be converted before upload.
+    subtitle_types = {".vtt": "text/vtt"}
+    audio_types = {
+        ".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".aac": "audio/aac",
+        ".ogg": "audio/ogg", ".wav": "audio/wav", ".flac": "audio/flac",
+    }
+    allowed_types = subtitle_types if kind == "subtitle" else audio_types
+    content_type = allowed_types.get(extension)
+    if not content_type:
+        raise HTTPException(status_code=415, detail=f"Unsupported {kind} format. Supported files: {', '.join(sorted(allowed_types))}.")
+
+    try:
+        file.file.seek(0, os.SEEK_END)
+        file_size = file.file.tell()
+        file.file.seek(0)
+    except (OSError, ValueError):
+        raise HTTPException(status_code=400, detail="Unable to read the uploaded file.")
+    if file_size <= 0 or file_size > 200_000_000:
+        raise HTTPException(status_code=413, detail="Subtitle/audio files must be between 1 byte and 200 MB.")
+
     with db() as connection:
-        row = connection.execute(f'SELECT "{column}" FROM movies WHERE id = %s', (movie_id,)).fetchone()
-        if not row: raise HTTPException(status_code=404, detail="Movie not found.")
-        tracks = parse_json(row[column], []); tracks.append(track)
-        connection.execute(f'UPDATE movies SET "{column}" = %s WHERE id = %s', (json.dumps(tracks), movie_id))
-        record_log(connection, "MEDIA_UPLOAD", f"Uploaded {kind} track ({language}) for movie {movie_id}", user["email"])
+        movie_exists = connection.execute("SELECT id FROM movies WHERE id = %s", (movie_id,)).fetchone()
+    if not movie_exists:
+        raise HTTPException(status_code=404, detail="Movie not found. Save its details before uploading media tracks.")
+
+    safe_movie_id = re.sub(r"[^A-Za-z0-9_-]", "", movie_id)[:80] or "movie"
+    if VIDEO_STORAGE_DRIVER == "local":
+        try:
+            object_path, stored_size = store_local_file(
+                file.file,
+                f"films/{safe_movie_id}/{kind}",
+                extension,
+                200_000_000,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=413, detail=str(exc))
+        except OSError:
+            logger.exception("Could not save %s file for movie %s", kind, movie_id)
+            raise HTTPException(status_code=507, detail="The backend could not save this media file. Check disk space and permissions.")
+        public_url = local_media_url(str(request.base_url), object_path)
+    else:
+        if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY or not SUPABASE_URL.startswith("https://"):
+            raise HTTPException(status_code=503, detail="Supabase media storage is not configured correctly.")
+        object_path = f"films/{safe_movie_id}/{kind}/{uuid.uuid4().hex}{extension}"
+        bucket_segment = quote(SUPABASE_VIDEO_BUCKET, safe="")
+        object_segment = quote(object_path, safe="/")
+        upload_url = f"{SUPABASE_URL}/storage/v1/object/{bucket_segment}/{object_segment}"
+        headers = {
+            "apikey": SUPABASE_SERVICE_ROLE_KEY,
+            "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+            "Content-Type": content_type,
+            "Cache-Control": "3600",
+            "x-upsert": "false",
+        }
+        try:
+            file.file.seek(0)
+            storage_response = requests.post(upload_url, data=file.file, headers=headers, timeout=(15, 180))
+        except requests.RequestException:
+            raise HTTPException(status_code=502, detail="Could not reach Supabase Storage for this media file.")
+        if not storage_response.ok:
+            if storage_response.status_code == 413:
+                raise HTTPException(status_code=413, detail="Supabase Storage rejected the file because of the project's upload limit.")
+            raise HTTPException(status_code=502, detail="Supabase Storage rejected this file. Check the bucket and server-side key settings.")
+        public_url = f"{SUPABASE_URL}/storage/v1/object/public/{bucket_segment}/{object_segment}"
+
+    track = {
+        "language": (language or "English").strip()[:40],
+        "url": public_url,
+        "fileName": original_name,
+        "path": object_path,
+    }
+    column = "subtitle_tracks" if kind == "subtitle" else "audio_tracks"
+    try:
+        with db() as connection:
+            row = connection.execute(f'SELECT "{column}" FROM movies WHERE id = %s', (movie_id,)).fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Movie not found.")
+            tracks = parse_json(row[column], [])
+            tracks.append(track)
+            connection.execute(f'UPDATE movies SET "{column}" = %s WHERE id = %s', (json.dumps(tracks), movie_id))
+            record_log(connection, "MEDIA_UPLOAD", f"Uploaded {kind} track ({language}) for movie {movie_id}", user["email"])
+    except Exception:
+        if VIDEO_STORAGE_DRIVER == "local":
+            delete_local_media_url(public_url)
+        logger.exception("Could not attach uploaded %s asset to movie %s", kind, movie_id)
+        raise
+
     return {"success": True, "movieId": movie_id, "kind": kind, "track": track}
 
 
