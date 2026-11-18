@@ -457,44 +457,69 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[1000] bg-[#050505] text-white flex flex-col overflow-hidden animate-in fade-in duration-500">
-      {/* Sidebar-style Header */}
-      <div className="flex h-full">
-        <div className="w-64 bg-black border-r border-white/10 flex flex-col p-6 gap-8">
-          <div className="flex items-center gap-3 px-2">
-            <Logo size="sm" brand="aimefilms" />
+    <div className="fixed inset-0 z-[1000] flex overflow-hidden bg-[#0b1220] text-slate-100 animate-in fade-in duration-300">
+      <div className="flex h-full min-h-0 w-full">
+        <aside className="flex w-[232px] shrink-0 flex-col border-r border-slate-700/70 bg-[#111827] px-4 py-5">
+          <div className="flex items-center gap-3 border-b border-slate-700/70 px-2 pb-6">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-800 ring-1 ring-slate-600/70">
+              <Logo size="sm" brand="aimefilms" />
+            </div>
+            <div className="min-w-0">
+              <p className="truncate text-sm font-bold tracking-wide text-white">AimeFilms</p>
+              <p className="mt-0.5 text-[11px] text-slate-400">Admin workspace</p>
+            </div>
           </div>
 
-          <nav className="flex flex-col gap-2">
+          <nav className="mt-6 flex-1 space-y-6 overflow-y-auto pr-1">
             {[
-              { id: 'analytics', label: 'Insights', icon: '📊' },
-              { id: 'movies', label: 'Film Inventory', icon: '🎬' },
-              { id: 'media', label: 'Media Library', icon: '📁' },
-              { id: 'users', label: 'User Registry', icon: '👥' },
-              { id: 'history', label: 'Event Logs', icon: '📜' },
-              { id: 'feedback', label: 'Feedback', icon: '💬', badge: unreadMessageCount },
-              { id: 'settings', label: 'System Status', icon: '⚙️' },
-            ].map(tab => (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id as any)}
-                className={`flex items-center justify-between px-4 py-3 rounded-xl font-bold text-sm transition-all ${activeTab === tab.id ? `${currentBrand.bg} text-white shadow-lg ${currentBrand.shadow}` : 'text-gray-500 hover:bg-white/5 hover:text-white'}`}
-              >
-                <div className="flex items-center gap-3">
-                  <span>{tab.icon}</span>
-                  {tab.label}
+              { title: 'OVERVIEW', items: [{ id: 'analytics', label: 'Dashboard', icon: LayoutDashboard }] },
+              { title: 'CONTENT MANAGER', items: [
+                { id: 'movies', label: 'Movies & TV', icon: Clapperboard },
+                { id: 'upload', label: 'Upload & Transcode', icon: CloudUpload },
+                { id: 'media', label: 'Media Library', icon: FolderOpen },
+              ] },
+              { title: 'ADMINISTRATION', items: [
+                { id: 'users', label: 'Users', icon: Users },
+                { id: 'feedback', label: 'Feedback inbox', icon: MessageSquare },
+                { id: 'history', label: 'Event logs', icon: Activity },
+              ] },
+              { title: 'SYSTEM', items: [
+                { id: 'settings', label: 'Server & Settings', icon: Server },
+              ] },
+            ].map(group => (
+              <section key={group.title}>
+                <p className="mb-2 px-3 text-[9px] font-bold tracking-[0.18em] text-slate-500">{group.title}</p>
+                <div className="space-y-1">
+                  {group.items.map(item => {
+                    const Icon = item.icon;
+                    const selected = activeTab === item.id;
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => setActiveTab(item.id as any)}
+                        className={`group flex w-full items-center gap-3 rounded-lg border-l-2 px-3 py-2.5 text-left text-[12px] font-medium transition-colors ${
+                          selected
+                            ? 'border-indigo-400 bg-indigo-500/15 text-white'
+                            : 'border-transparent text-slate-400 hover:bg-slate-800/80 hover:text-slate-100'
+                        }`}
+                      >
+                        <Icon size={16} strokeWidth={1.8} className={selected ? 'text-indigo-300' : 'text-slate-500 group-hover:text-slate-300'} />
+                        <span className="min-w-0 flex-1 truncate">{item.label}</span>
+                        {item.id === 'feedback' && unreadMessageCount > 0 && (
+                          <span className="rounded-full bg-rose-500 px-1.5 py-0.5 text-[9px] font-bold text-white">{unreadMessageCount}</span>
+                        )}
+                      </button>
+                    );
+                  })}
                 </div>
-                {tab.badge !== undefined && tab.badge > 0 && (
-                  <span className={`bg-white ${currentBrand.text} px-2 py-0.5 rounded-full text-[10px] font-black`}>
-                    {tab.badge}
-                  </span>
-                )}
-              </button>
+              </section>
             ))}
           </nav>
 
-          <div className="mt-auto space-y-2">
-            <button 
+          <div className="mt-5 space-y-2 border-t border-slate-700/70 pt-4">
+            <button
+              type="button"
               onClick={async () => {
                 setAdminError('');
                 try {
@@ -521,59 +546,92 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
                   const url = URL.createObjectURL(blob);
                   const a = document.createElement('a');
                   a.href = url;
-                  a.download = `aimefilms_database_backup_${new Date().toISOString().split('T')[0]}.json`;
+                  a.download = `aimefilms_backup_${new Date().toISOString().split('T')[0]}.json`;
                   a.click();
                   URL.revokeObjectURL(url);
                 } catch (error) {
                   setAdminError(error instanceof Error ? error.message : 'Database export failed.');
                 }
               }}
-              className="w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold text-sm text-blue-400 hover:bg-blue-400/10 transition-all"
+              className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-xs font-semibold text-slate-400 transition hover:bg-slate-800 hover:text-slate-100"
             >
-              <span>💾</span> Export Data
+              <Download size={16} /> Export database
             </button>
-            <button onClick={onClose} className="w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold text-sm text-red-500 hover:bg-red-500/10 transition-all">
-              <span>🚪</span> Exit Backend
+            <button onClick={onClose} className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-xs font-semibold text-rose-300 transition hover:bg-rose-500/10">
+              <LogOut size={16} /> Exit admin
             </button>
           </div>
-        </div>
+        </aside>
 
-        {/* Main Content Area */}
-        <div className="flex-1 flex flex-col overflow-hidden">
-          <header className="h-20 border-b border-white/10 flex items-center justify-between px-10 bg-black/50 backdrop-blur-md">
-            <h2 className="text-2xl font-black uppercase tracking-tight italic">
-              {activeTab === 'analytics' && 'System Insights'}
-              {activeTab === 'movies' && 'Manage Films'}
-              {activeTab === 'users' && 'User Management'}
-              {activeTab === 'history' && 'System History'}
-              {activeTab === 'feedback' && 'User Feedback'}
-              {activeTab === 'media' && 'Media Library'}
-              {activeTab === 'settings' && 'System Status & Configuration'}
-            </h2>
-            {(activeTab === 'movies' || activeTab === 'media') && (
-              <div className="flex flex-wrap items-center justify-end gap-3">
-                <label htmlFor="admin-brand-filter" className="sr-only">Filter movie catalogue by website</label>
+        <div className="flex min-w-0 flex-1 flex-col overflow-hidden bg-[#0b1220]">
+          <header className="flex min-h-[68px] flex-wrap items-center justify-between gap-3 border-b border-slate-700/70 bg-[#111827]/95 px-5 py-3 lg:px-8">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 text-[10px] text-slate-500">
+                <span>Admin</span><span>/</span><span className="text-slate-300">
+                  {activeTab === 'analytics' ? 'Dashboard' : activeTab === 'movies' ? 'Movies & TV' : activeTab === 'upload' ? 'Upload & Transcode' : activeTab === 'media' ? 'Media Library' : activeTab === 'users' ? 'Users' : activeTab === 'feedback' ? 'Feedback inbox' : activeTab === 'history' ? 'Event logs' : 'Server & Settings'}
+                </span>
+              </div>
+              <h2 className="mt-1 truncate text-lg font-semibold tracking-tight text-white">
+                {activeTab === 'analytics' && 'Dashboard'}
+                {activeTab === 'movies' && 'Content Manager'}
+                {activeTab === 'upload' && 'Movie Upload & Transcoding'}
+                {activeTab === 'users' && 'User & Role Management'}
+                {activeTab === 'history' && 'System Activity'}
+                {activeTab === 'feedback' && 'Feedback Inbox'}
+                {activeTab === 'media' && 'Media Library'}
+                {activeTab === 'settings' && 'Server & Settings'}
+              </h2>
+            </div>
+
+            <div className="flex items-center gap-2 sm:gap-3">
+              <span className="hidden text-[10px] text-slate-500 xl:inline">Database-backed workspace</span>
+              <div className="relative hidden sm:block">
+                <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+                <input
+                  aria-label="Search films"
+                  value={movieSearch}
+                  onFocus={() => setActiveTab('movies')}
+                  onChange={e => setMovieSearch(e.target.value)}
+                  placeholder="Search films..."
+                  className="w-44 rounded-lg border border-slate-600 bg-[#0b1220] py-2 pl-9 pr-3 text-xs text-slate-100 outline-none placeholder:text-slate-500 focus:border-indigo-400 lg:w-60"
+                />
+              </div>
+              <button type="button" title="Open feedback inbox" onClick={() => setActiveTab('feedback')} className="relative rounded-lg p-2 text-slate-400 transition hover:bg-slate-800 hover:text-white">
+                <Bell size={17} />
+                {unreadMessageCount > 0 && <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-rose-500 ring-2 ring-[#111827]" />}
+              </button>
+              <button type="button" title="System settings" onClick={() => setActiveTab('settings')} className="rounded-lg p-2 text-slate-400 transition hover:bg-slate-800 hover:text-white">
+                <Settings size={17} />
+              </button>
+              <div className="hidden items-center gap-2 border-l border-slate-700 pl-3 sm:flex">
+                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-indigo-500/20 text-xs font-bold text-indigo-200">A</div>
+                <div className="hidden lg:block">
+                  <p className="text-[11px] font-semibold text-slate-200">Administrator</p>
+                  <p className="text-[9px] text-slate-500">AimeFilms</p>
+                </div>
+              </div>
+              {(activeTab === 'movies' || activeTab === 'media') && (
                 <select
-                  id="admin-brand-filter"
+                  aria-label="Filter movie catalogue by website"
                   value={catalogueFilter}
                   onChange={e => setCatalogueFilter(e.target.value as Brand | 'all')}
-                  className="max-w-[220px] rounded-xl border border-white/10 bg-[#151515] px-4 py-2 text-xs font-bold text-white outline-none focus:border-violet-400"
+                  className="max-w-[170px] rounded-lg border border-slate-600 bg-[#0b1220] px-3 py-2 text-[11px] font-medium text-slate-200 outline-none focus:border-indigo-400"
                 >
-                  <option value="aimefilms">AimeFilms films</option>
-                  <option value="filmsnyarwanda">FilmsNyarwanda films</option>
-                  <option value="princefilms">PrinceFilms films</option>
-                  <option value="all">All websites — all films</option>
+                  <option value="aimefilms">AimeFilms</option>
+                  <option value="filmsnyarwanda">FilmsNyarwanda</option>
+                  <option value="princefilms">PrinceFilms</option>
+                  <option value="all">All websites</option>
                 </select>
-                {activeTab === 'movies' && (
-                  <button onClick={handleStartNewMovie} className={`bg-white text-black px-6 py-2 rounded-full font-black text-xs uppercase tracking-widest hover:${currentBrand.bg} hover:text-white transition-all`}>
-                    + Upload New Film
-                  </button>
-                )}
-              </div>
-            )}
+              )}
+              {(activeTab === 'movies' || activeTab === 'upload') && (
+                <button type="button" onClick={handleStartNewMovie} className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-[11px] font-semibold text-white shadow-sm shadow-indigo-950/40 transition hover:bg-indigo-500">
+                  <CloudUpload size={15} /> <span className="hidden sm:inline">New content</span>
+                </button>
+              )}
+            </div>
           </header>
 
-          <main className="flex-1 overflow-y-auto p-10 no-scrollbar">
+          <main className="flex-1 overflow-y-auto p-5 no-scrollbar lg:p-7">
             {adminError && (
               <div role="alert" className="mb-6 flex items-start justify-between gap-4 rounded-2xl border border-red-500/30 bg-red-500/10 px-5 py-4 text-sm text-red-200">
                 <span>{adminError}</span>
