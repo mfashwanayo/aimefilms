@@ -22,23 +22,23 @@ import { translations } from './locales/translations';
 type ViewState = 'home' | 'detail';
 
 function readLocal(key: string): string | null {
-  try { return typeof window === 'undefined' ? null : window.readLocal(key); }
+  try { return typeof window === 'undefined' ? null : window.localStorage.getItem(key); }
   catch { return null; }
 }
 function writeLocal(key: string, value: string): void {
-  try { if (typeof window !== 'undefined') window.writeLocal(key, value); }
+  try { if (typeof window !== 'undefined') window.localStorage.setItem(key, value); }
   catch { /* Storage may be disabled or full; keep the current session working. */ }
 }
 function removeLocal(key: string): void {
-  try { if (typeof window !== 'undefined') window.removeLocal(key); }
+  try { if (typeof window !== 'undefined') window.localStorage.removeItem(key); }
   catch { /* Ignore browser storage restrictions. */ }
 }
 function readSession(key: string): string | null {
-  try { return typeof window === 'undefined' ? null : window.readSession(key); }
+  try { return typeof window === 'undefined' ? null : window.sessionStorage.getItem(key); }
   catch { return null; }
 }
 function writeSession(key: string, value: string): void {
-  try { if (typeof window !== 'undefined') window.writeSession(key, value); }
+  try { if (typeof window !== 'undefined') window.sessionStorage.setItem(key, value); }
   catch { /* A session preference is optional. */ }
 }
 
