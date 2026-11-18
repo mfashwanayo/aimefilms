@@ -1,64 +1,43 @@
 from __future__ import annotations
 
-import base64
-import hashlib
-import hmac
 import json
+import logging
 import os
 import re
-import secrets
-import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
-from dotenv import load_dotenv
-import psycopg
 import requests
-from psycopg.rows import dict_row
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.security import HTTPBearer
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.security import HTTPBearer
+from fastapi.staticfiles import StaticFiles
 
-load_dotenv(Path(__file__).resolve().parent / ".env")
+from core.catalogue import (
+    BOOLEAN_FIELDS, JSON_FIELDS, MOVIE_DEFAULTS, MOVIE_FIELDS,
+    insert_movie, movie_from_row, movie_values, normalize_movie, parse_json,
+)
+from core.config import (
+    ADMIN_EMAIL, ADMIN_NAME, ADMIN_PASSWORD, DATABASE_URL, FRONTEND_ORIGINS,
+    MAX_VIDEO_UPLOAD_BYTES, MAX_VIDEO_UPLOAD_MB, SUPABASE_PUBLISHABLE_KEY,
+    SUPABASE_SERVICE_ROLE_KEY, SUPABASE_URL, SUPABASE_VIDEO_BUCKET,
+    TMDB_API_KEY, TOKEN_SECRET, VIDEO_MIME_BY_EXTENSION, VIDEO_PUBLIC_DIR,
+    VIDEO_STORAGE_DRIVER, validate_config,
+)
+from core.database import close_pool, db, open_pool
+from core.media_storage import (
+    clean_stale_upload_parts, delete_local_media_url, ensure_storage_dirs,
+    local_media_url, store_local_file,
+)
+from core.security import (
+    admin_user, current_user, encode_token, hash_password, public_user, verify_password,
+)
 
-# All credentials are provided by the backend environment (Render), never by the
-# browser or checked-in source. DATABASE_URL must be the PostgreSQL connection
-# string from Supabase's Connect panel, not the https://<project>.supabase.co URL.
-DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
-ADMIN_NAME = os.getenv("ADMIN_NAME", "").strip()
-ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "").strip().lower()
-ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
-TOKEN_SECRET = os.getenv("TOKEN_SECRET", "")
-TOKEN_TTL_SECONDS = 60 * 60 * 24 * 7
-
-# Video uploads use Supabase Storage. Keep this key private and server-side.
-SUPABASE_URL = os.getenv("SUPABASE_URL", "").strip().rstrip("/")
-SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
-SUPABASE_PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY", "").strip()
-SUPABASE_VIDEO_BUCKET = os.getenv("SUPABASE_VIDEO_BUCKET", "aimefilms-videos").strip()
-TMDB_API_KEY = os.getenv("TMDB_API_KEY", "").strip()
-try:
-    MAX_VIDEO_UPLOAD_MB = max(1, int(os.getenv("MAX_VIDEO_UPLOAD_MB", "3900")))
-except ValueError:
-    MAX_VIDEO_UPLOAD_MB = 3900
-MAX_VIDEO_UPLOAD_BYTES = MAX_VIDEO_UPLOAD_MB * 1_000_000
-VIDEO_MIME_BY_EXTENSION = {
-    ".mp4": "video/mp4",
-    ".webm": "video/webm",
-    ".mov": "video/quicktime",
-    ".mkv": "video/x-matroska",
-}
-
-FRONTEND_ORIGINS = [
-    origin.strip().rstrip("/")
-    for origin in os.getenv("FRONTEND_ORIGINS", "http://localhost:5173").split(",")
-    if origin.strip()
-]
-
+logger = logging.getLogger("aimefilms.api")
 
 app = FastAPI(
     title="AimeFilms API",
@@ -67,6 +46,9 @@ app = FastAPI(
 )
 
 video_upload_bearer = HTTPBearer(auto_error=False)
+
+ensure_storage_dirs()
+app.mount("/media", StaticFiles(directory=str(VIDEO_PUBLIC_DIR), check_dir=False), name="media")
 
 @app.middleware("http")
 async def reject_oversized_video_uploads(request: Request, call_next):
@@ -97,6 +79,21 @@ async def http_error_response(request: Request, exc: HTTPException) -> JSONRespo
         content={"success": False, "message": message, "detail": message},
         headers=exc.headers,
     )
+
+
+@app.exception_handler(Exception)
+async def unexpected_error_response(request: Request, exc: Exception) -> JSONResponse:
+    """Return a safe API error and log the traceback instead of exposing internals."""
+    logger.error(
+        "Unhandled API error for %s %s",
+        request.method,
+        request.url.path,
+        exc_info=(type(exc), exc, exc.__traceback__),
+    )
+    return JSONResponse(
+        status_code=500,
+        content={"success": False, "message": "The server could not complete this request. Please retry."},
+    )
 app.add_middleware(
     CORSMiddleware,
     allow_origins=FRONTEND_ORIGINS,
@@ -105,78 +102,8 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type"],
 )
 
-MOVIE_FIELDS = [
-    "id", "name", "brand", "category", "section", "is_hidden", "description",
-    "highlights", "pros", "image_url", "logo_url", "link", "video_url",
-    "full_movie_url", "rating", "year", "duration", "cast", "synopsis",
-    "is_trending", "is_new", "genre", "match_score", "price", "tmdb_id", "version",
-    "subcategory", "preview_text", "landscape_image_url", "director", "producer",
-    "languages", "tags", "subtitle_tracks", "audio_tracks",
-]
-JSON_FIELDS = {"highlights", "pros", "cast", "genre", "languages", "tags", "subtitle_tracks", "audio_tracks"}
-BOOLEAN_FIELDS = {"is_hidden", "is_trending", "is_new"}
-MOVIE_DEFAULTS: dict[str, Any] = {
-    "name": "Untitled movie", "brand": "aimefilms", "category": "General Entertainment",
-    "section": "english", "is_hidden": False, "description": "", "highlights": [],
-    "pros": [], "image_url": "", "logo_url": "", "link": "", "video_url": "",
-    "full_movie_url": "", "rating": "0", "year": "", "duration": "", "cast": [],
-    "synopsis": "", "is_trending": False, "is_new": False, "genre": [],
-    "match_score": 0, "price": None, "tmdb_id": "", "version": "", "subcategory": "",
-    "preview_text": "", "landscape_image_url": "", "director": "", "producer": "",
-    "languages": [], "tags": [], "subtitle_tracks": [], "audio_tracks": [],
-}
-
-
-def validate_config() -> None:
-    missing = [
-        key for key, value in (
-            ("DATABASE_URL", DATABASE_URL),
-            ("ADMIN_NAME", ADMIN_NAME),
-            ("ADMIN_EMAIL", ADMIN_EMAIL),
-            ("ADMIN_PASSWORD", ADMIN_PASSWORD),
-            ("TOKEN_SECRET", TOKEN_SECRET),
-        ) if not value
-    ]
-    if missing:
-        raise RuntimeError("Missing required environment variables: " + ", ".join(missing))
-    if not DATABASE_URL.startswith(("postgresql://", "postgres://")):
-        raise RuntimeError("DATABASE_URL must be a PostgreSQL connection string from Supabase Connect.")
-    if len(ADMIN_PASSWORD) < 12:
-        raise RuntimeError("ADMIN_PASSWORD must be at least 12 characters long.")
-    if len(TOKEN_SECRET) < 32:
-        raise RuntimeError("TOKEN_SECRET must be at least 32 characters long.")
-
-
-def db() -> psycopg.Connection:
-    if not DATABASE_URL:
-        raise RuntimeError("DATABASE_URL is not configured. Set it in the backend environment.")
-    return psycopg.connect(
-        DATABASE_URL,
-        row_factory=dict_row,
-        sslmode="require",
-        connect_timeout=10,
-    )
-
-
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
-
-
-def hash_password(password: str) -> str:
-    salt = secrets.token_bytes(16)
-    digest = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 240_000)
-    return base64.urlsafe_b64encode(salt).decode() + "$" + base64.urlsafe_b64encode(digest).decode()
-
-
-def verify_password(password: str, stored: str) -> bool:
-    try:
-        salt_text, digest_text = stored.split("$", 1)
-        salt = base64.urlsafe_b64decode(salt_text.encode())
-        expected = base64.urlsafe_b64decode(digest_text.encode())
-        actual = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 240_000)
-        return hmac.compare_digest(actual, expected)
-    except (ValueError, TypeError):
-        return False
 
 
 def init_db() -> None:
@@ -262,129 +189,6 @@ def init_db() -> None:
             connection.execute(f'ALTER TABLE "{table}" ENABLE ROW LEVEL SECURITY')
 
 
-def encode_token(user: dict[str, Any]) -> str:
-    payload = {"email": user["email"], "exp": int(time.time()) + TOKEN_TTL_SECONDS}
-    encoded = base64.urlsafe_b64encode(json.dumps(payload, separators=(",", ":")).encode()).decode().rstrip("=")
-    signature = hmac.new(TOKEN_SECRET.encode(), encoded.encode(), hashlib.sha256).hexdigest()
-    return encoded + "." + signature
-
-
-def current_user(request: Request) -> dict[str, Any]:
-    header = request.headers.get("authorization", "")
-    try:
-        if not header.lower().startswith("bearer "):
-            raise ValueError("missing bearer token")
-        encoded, signature = header.split(" ", 1)[1].split(".", 1)
-        expected = hmac.new(TOKEN_SECRET.encode(), encoded.encode(), hashlib.sha256).hexdigest()
-        if not hmac.compare_digest(signature, expected):
-            raise ValueError("invalid signature")
-        payload = json.loads(base64.urlsafe_b64decode((encoded + "===").encode()).decode())
-        if int(payload["exp"]) < int(time.time()):
-            raise ValueError("expired token")
-    except (ValueError, KeyError, TypeError, json.JSONDecodeError, IndexError):
-        raise HTTPException(status_code=401, detail="Invalid or expired token.")
-
-    with db() as connection:
-        user = connection.execute("SELECT * FROM users WHERE email = %s", (payload["email"],)).fetchone()
-    if not user or user["is_blocked"]:
-        raise HTTPException(status_code=403, detail="Account is unavailable.")
-    return user
-
-
-def admin_user(request: Request) -> dict[str, Any]:
-    user = current_user(request)
-    if user["role"] != "admin":
-        raise HTTPException(status_code=403, detail="Administrator access required.")
-    return user
-
-
-def public_user(user: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "name": user["name"], "email": user["email"], "avatar": user.get("avatar"),
-        "role": user["role"], "isVerified": bool(user.get("is_verified", 1)),
-        "canDownload": bool(user.get("can_download", 1)), "language": user.get("language", "EN"),
-        "isBlocked": bool(user.get("is_blocked", 0)), "joinedAt": user.get("joined_at"),
-    }
-
-
-def parse_json(value: Any, default: Any) -> Any:
-    if value in (None, ""):
-        return default
-    try:
-        return json.loads(value) if isinstance(value, str) else value
-    except (TypeError, json.JSONDecodeError):
-        return default
-
-
-def movie_from_row(row: dict[str, Any]) -> dict[str, Any]:
-    value = dict(row)
-    return {
-        "id": value["id"], "name": value["name"], "brand": value["brand"], "category": value["category"],
-        "section": value["section"], "isHidden": bool(value["is_hidden"]), "description": value["description"],
-        "highlights": parse_json(value["highlights"], []), "pros": parse_json(value["pros"], []),
-        "imageUrl": value["image_url"], "logoUrl": value["logo_url"], "link": value["link"],
-        "videoUrl": value["video_url"], "fullMovieUrl": value["full_movie_url"], "rating": value["rating"],
-        "year": value["year"], "duration": value["duration"], "cast": parse_json(value["cast"], []),
-        "synopsis": value["synopsis"], "isTrending": bool(value["is_trending"]), "isNew": bool(value["is_new"]),
-        "genre": parse_json(value["genre"], []), "matchScore": float(value["match_score"]), "price": value["price"],
-        "tmdbId": value.get("tmdb_id", ""), "version": value.get("version", ""),
-        "subcategory": value.get("subcategory", ""), "previewText": value.get("preview_text", ""),
-        "landscapeImageUrl": value.get("landscape_image_url", ""), "director": value.get("director", ""),
-        "producer": value.get("producer", ""), "languages": parse_json(value.get("languages"), []),
-        "tags": parse_json(value.get("tags"), []), "subtitleTracks": parse_json(value.get("subtitle_tracks"), []),
-        "audioTracks": parse_json(value.get("audio_tracks"), []),
-    }
-
-
-def normalize_movie(data: dict[str, Any], movie_id: str | None = None) -> dict[str, Any]:
-    movie = {**MOVIE_DEFAULTS, **data}
-    aliases = {
-        "imageUrl": "image_url", "logoUrl": "logo_url", "videoUrl": "video_url",
-        "fullMovieUrl": "full_movie_url", "isHidden": "is_hidden", "isTrending": "is_trending",
-        "isNew": "is_new", "matchScore": "match_score", "tmdbId": "tmdb_id",
-        "previewText": "preview_text", "landscapeImageUrl": "landscape_image_url",
-        "subtitleTracks": "subtitle_tracks", "audioTracks": "audio_tracks",
-    }
-    for source, target in aliases.items():
-        if source in movie:
-            movie[target] = movie.pop(source)
-    movie["id"] = movie_id or movie.get("id") or uuid.uuid4().hex
-    for field in JSON_FIELDS:
-        if not isinstance(movie.get(field), list):
-            movie[field] = []
-    for field in BOOLEAN_FIELDS:
-        movie[field] = bool(movie.get(field))
-    # PostgreSQL is stricter than SQLite about values stored in TEXT columns.
-    for field in ("name", "brand", "category", "section", "description", "image_url", "logo_url",
-                  "link", "video_url", "full_movie_url", "rating", "year", "duration", "synopsis",
-                  "tmdb_id", "version", "subcategory", "preview_text", "landscape_image_url", "director", "producer"):
-        if movie.get(field) is None:
-            movie[field] = ""
-        elif not isinstance(movie[field], str):
-            movie[field] = str(movie[field])
-    if movie.get("price") is not None and not isinstance(movie["price"], str):
-        movie["price"] = str(movie["price"])
-    return movie
-
-
-def movie_values(movie: dict[str, Any]) -> tuple[Any, ...]:
-    return tuple(
-        json.dumps(movie[field]) if field in JSON_FIELDS
-        else int(movie[field]) if field in BOOLEAN_FIELDS
-        else movie.get(field)
-        for field in MOVIE_FIELDS
-    )
-
-
-def insert_movie(connection: psycopg.Connection, movie: dict[str, Any]) -> None:
-    columns = ",".join(f'"{field}"' for field in MOVIE_FIELDS)
-    placeholders = ",".join("%s" for _ in MOVIE_FIELDS)
-    connection.execute(
-        f"INSERT INTO movies ({columns}) VALUES ({placeholders}) ON CONFLICT DO NOTHING",
-        movie_values(movie),
-    )
-
-
 def record_log(connection: psycopg.Connection, event_type: str, details: str, email: str | None = None) -> None:
     connection.execute(
         "INSERT INTO logs (id, type, details, user_email, timestamp) VALUES (%s, %s, %s, %s, %s)",
@@ -445,7 +249,21 @@ async def json_body(request: Request) -> dict[str, Any]:
 @app.on_event("startup")
 def startup() -> None:
     validate_config()
-    init_db()
+    open_pool()
+    ensure_storage_dirs()
+    removed_parts = clean_stale_upload_parts()
+    if removed_parts:
+        logger.info("Removed %s abandoned temporary uploads", removed_parts)
+    try:
+        init_db()
+    except Exception:
+        close_pool()
+        raise
+
+
+@app.on_event("shutdown")
+def shutdown() -> None:
+    close_pool()
 
 
 @app.get("/")
