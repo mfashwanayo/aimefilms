@@ -1,40 +1,94 @@
-# AimeFilms FastAPI backend
+# AimeFilms API
 
-This backend serves the AimeFilms React/Vite website. It supports SQLite for local development and Supabase PostgreSQL when `DATABASE_URL` is set.
+FastAPI backend for the AimeFilms React/Vite application. The API owns authentication, catalogue writes, user management, view tracking, messages and media-upload authorization.
 
-## Run locally (Windows PowerShell)
+## Local development
+
+Requirements: Python 3.11+ and a PostgreSQL database (the project currently uses Supabase PostgreSQL).
+
+In PowerShell, start the backend in its own terminal:
 
 ```powershell
 cd backend-python
 py -m venv .venv
 .\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 Copy-Item .env.example .env
 ```
 
-Edit `.env` and set `ADMIN_NAME`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`, and `TOKEN_SECRET`. For local testing, leave `DATABASE_URL` empty to use SQLite. Start the API:
+Edit `.env` and set `DATABASE_URL`, `ADMIN_NAME`, `ADMIN_EMAIL`, `ADMIN_PASSWORD` and `TOKEN_SECRET`. For local video storage keep:
 
-```powershell
-uvicorn app:app --host 0.0.0.0 --port 8001 --reload
+```env
+VIDEO_STORAGE_DRIVER=local
+VIDEO_STORAGE_DIR=storage
+FRONTEND_ORIGINS=http://localhost:5173
 ```
 
-Open http://localhost:8001/docs.
+Start the API:
 
-## Use Supabase PostgreSQL on Render
+```powershell
+uvicorn app:app --host 127.0.0.1 --port 8001 --reload
+```
 
-1. In your Supabase project, open **Connect** and copy the PostgreSQL connection string (use the session pooler if needed).
-2. In Render, configure these private backend environment variables: `DATABASE_URL`, `ADMIN_NAME`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `TOKEN_SECRET`, and `FRONTEND_ORIGINS`.
-3. Use root directory `backend-python`, build command `pip install -r requirements.txt`, and start command `uvicorn app:app --host 0.0.0.0 --port $PORT`.
-4. Set `FRONTEND_ORIGINS` to the exact public website origin. Never use a public frontend env var for database passwords or token secrets.
+Open <http://localhost:8001/docs> for API documentation. The health endpoint is <http://localhost:8001/health>.
 
-For production with `DATABASE_URL`, startup intentionally fails unless the administrator credentials and stable token secret are configured. Replace any credentials that may have been exposed in older versions.
+In a second terminal start the frontend:
 
-## Feedback inbox
+```powershell
+cd frontend
+npm ci
+npm run dev
+```
 
-The public contact form posts to `POST /api/feedback`. Messages are stored in the shared `messages` table and are returned by the admin-only `GET /api/admin/messages` route. Admin authentication remains required to read the inbox.
+Open <http://localhost:5173>.
 
-## Notes
+## Local media folders
 
-- The backend creates its tables at startup if they do not yet exist.
-- Existing Supabase tables are preserved; this backend does not delete data.
-- Existing SQLite data is not automatically migrated to PostgreSQL.
+With `VIDEO_STORAGE_DRIVER=local`, video files are streamed in 1 MiB chunks into a temporary file and atomically renamed after a successful write. The final layout is:
+
+```text
+backend-python/
+└── storage/
+    ├── .tmp/                  # incomplete upload files; cleaned on startup
+    └── public/
+        └── films/
+            └── <movie-id>/
+                ├── <generated-id>.mp4
+                ├── subtitle/
+                └── audio/
+```
+
+The original filename is not used as a disk path. The API generates file names and only serves files beneath the `/media/` mount. Deleting a film removes only files that belong to this application's managed media folder. The `storage/` directory is excluded from Git so uploaded videos are never accidentally committed.
+
+## Production storage on Render
+
+The Render blueprint sets `VIDEO_STORAGE_DRIVER=supabase`. The backend issues short-lived signed upload information and the browser uploads large files directly with resumable TUS chunks. This avoids sending multi-gigabyte files through the Render web process.
+
+Configure these private Render variables:
+
+- `DATABASE_URL`: PostgreSQL connection string from Supabase Connect
+- `ADMIN_NAME`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`
+- `TOKEN_SECRET`: random secret of at least 32 characters
+- `FRONTEND_ORIGINS`: exact deployed website origin(s)
+- `VIDEO_STORAGE_DRIVER=supabase`
+- `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_PUBLISHABLE_KEY`
+- `SUPABASE_VIDEO_BUCKET=aimefilms-videos`
+- `MAX_VIDEO_UPLOAD_MB=3900`
+
+A Render service without a persistent disk has an ephemeral filesystem. Do not set local disk storage on a production instance unless you have attached and mounted a persistent disk. The existing free Render blueprint keeps remote object storage for durable media.
+
+## Performance and resilience
+
+- A bounded psycopg connection pool reduces the overhead of opening a new PostgreSQL connection for every API request. Tune `DB_POOL_MIN_SIZE` and `DB_POOL_MAX_SIZE` for the database plan and expected concurrency.
+- PostgreSQL indexes support the catalogue, user-list, message-inbox and activity-log query paths.
+- Uploads stream in bounded chunks to disk in local mode; incomplete temporary files are removed at startup.
+- Routes return structured HTTP errors. Unexpected exceptions are logged server-side and return a generic 500 response instead of leaking internal details.
+- No recurring scheduler is currently needed. Temporary upload cleanup runs during API startup. Add a separate worker only for a real scheduled workload such as recurring retention policies or media transcoding.
+
+## Media processing scope
+
+The current API stores original video files. It does not yet run FFmpeg/GPU transcoding or a background encoding queue. The frontend should not display fake transcoding progress. A future encoding worker should be a separate process and queue consumer, not a scheduled request inside the web server.
+
+## Security notes
+
+Never commit real `.env` files, the Supabase service-role key, database passwords or token secrets. All admin routes require a valid administrator bearer token. Existing database tables are preserved by startup schema initialization; existing local SQLite files are not automatically migrated into PostgreSQL.

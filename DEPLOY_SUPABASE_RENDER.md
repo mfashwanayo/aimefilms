@@ -1,134 +1,74 @@
-# AimeFilms: secure admin login + Supabase PostgreSQL deployment
+# AimeFilms deployment: GitHub Pages + Render + Supabase
 
-This patch replaces the SQLite backend with Supabase PostgreSQL and removes client-side login/register fallback behavior. It does not contain your database password or replacement administrator password.
+This is the current deployment guide for the split repository. The frontend lives in `frontend/`; the FastAPI service lives in `backend-python/`. You do not need to run an old patch script to apply the folder split.
 
-## 1. Apply the files
+## 1. Supabase PostgreSQL
 
-Extract this bundle into the **root of your AimeFilms repository**, preserving folders. It replaces:
+In Supabase, open **Connect** and copy the PostgreSQL connection string. Use that connection string for `DATABASE_URL` on the backend; the HTTPS project URL is not a database URL.
 
-- `backend-python/app.py`
-- `backend-python/requirements.txt`
-- `backend-python/.env.example`
+Do not put a database password or the service-role key in React or GitHub-tracked files. The backend connects to PostgreSQL and handles all privileged data operations.
 
-It adds:
+## 2. Deploy the FastAPI service on Render
 
-- `supabase/schema.sql`
-- `scripts/apply_frontend_security.py`
-- this deployment guide
+Use the repository's `render.yaml` or configure a Python Web Service with:
 
-From the repository root, run:
+| Setting | Value |
+|---|---|
+| Root Directory | `backend-python` |
+| Build Command | `pip install -r requirements.txt` |
+| Start Command | `uvicorn app:app --host 0.0.0.0 --port $PORT` |
+| Health Check Path | `/health` |
 
-```bash
-python scripts/apply_frontend_security.py
+Configure these private environment variables:
+
+- `DATABASE_URL`: PostgreSQL connection string from Supabase Connect
+- `ADMIN_NAME`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`
+- `TOKEN_SECRET`: random secret, at least 32 characters
+- `FRONTEND_ORIGINS`: exact public website origin
+- `VIDEO_STORAGE_DRIVER=supabase`
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY` (private)
+- `SUPABASE_PUBLISHABLE_KEY`
+- `SUPABASE_VIDEO_BUCKET=aimefilms-videos`
+- `MAX_VIDEO_UPLOAD_MB=3900`
+- `TMDB_API_KEY` (optional)
+
+The configured admin email/password are synchronized on backend startup. Use a new password; never reuse one that appeared in an earlier public version of the project.
+
+### Why production uses Supabase Storage
+
+Local development uses the backend's `storage/` folder. Render services without a persistent disk use an ephemeral filesystem, so locally stored uploads could disappear after a restart or redeploy. The Render blueprint therefore selects Supabase Storage for durable production videos. Attach a persistent disk before changing production to local filesystem storage.
+
+The browser uploads directly to Supabase Storage with resumable TUS chunks; the multi-gigabyte source does not need to pass through the Render API process. The app limit is 3.9 GB, but the Supabase plan's Global file size limit must also allow that size. The application setting cannot override a provider plan limit.
+
+## 3. Deploy the frontend on GitHub Pages
+
+1. Open repository **Settings → Pages** and set the source to **GitHub Actions**.
+2. Open **Settings → Secrets and variables → Actions → Variables**.
+3. Add `VITE_API_BASE_URL` with the deployed FastAPI public HTTPS URL (no trailing slash).
+4. Set the backend's `FRONTEND_ORIGINS` to the exact frontend origin, without the `/aimefilms/` repository path.
+
+The Pages workflow installs dependencies from `frontend/package-lock.json`, builds `frontend/`, and publishes `frontend/dist/`.
+
+## 4. Local development and local uploads
+
+For local development, set these values in `backend-python/.env`:
+
+```env
+VIDEO_STORAGE_DRIVER=local
+VIDEO_STORAGE_DIR=storage
+FRONTEND_ORIGINS=http://localhost:5173
 ```
 
-That script removes the hardcoded browser admin credential block and makes login/registration fail closed if the API is unavailable. It also ignores `.env` files in Git.
+Start the backend on port 8001 and the frontend on port 5173 in separate terminals. Local video and media files are written under `backend-python/storage/public/films/<movie-id>/` and served by FastAPI at `/media/`. The storage folder is ignored by Git.
 
-Before committing, check:
+## 5. Verify
 
-```bash
-python -m py_compile backend-python/app.py
-git diff --check
-npm install
-npm run build
-```
+- `https://YOUR-BACKEND.onrender.com/health` should return a healthy database status.
+- Open the website and test public catalogue loading, registration, admin login, film edits, and a small video upload.
+- Confirm that `FRONTEND_ORIGINS` and `VITE_API_BASE_URL` match the deployed URLs.
+- Confirm Supabase Storage's plan/global upload limit before attempting a multi-gigabyte file.
 
-The repository includes the updated FastAPI backend, security fixes, schema and Render blueprint.
+## Operational notes
 
-## 2. Connect the backend to your Supabase database
-
-Your Supabase project is `fadsjkoaoxbtigelhcna`. The URL `https://fadsjkoaoxbtigelhcna.supabase.co` is the Supabase API URL, **not** the PostgreSQL connection string.
-
-1. Open your project in Supabase.
-2. Click **Connect** and select the PostgreSQL connection string. For a Render backend, try **Session pooler** if the direct host is not reachable on IPv4; Supabase explains the choices in its [database connection guide](https://supabase.com/docs/guides/database/connecting-to-postgres).
-3. Copy the connection string privately. Replace its password placeholder with your database password. URL-encode special characters in the password if required by the connection-string format.
-4. Do **not** put the database password or a Supabase secret/service-role key in React code, GitHub files, or this chat.
-5. You may optionally run `supabase/schema.sql` once in **Supabase → SQL Editor**. The backend also creates the tables at startup if they do not exist.
-
-## 3. Configure Render backend service
-
-In Render, create or update the Python Web Service for this GitHub repository.
-
-- **Root Directory:** `backend-python`
-- **Build Command:** `pip install -r requirements.txt`
-- **Start Command:** `uvicorn app:app --host 0.0.0.0 --port $PORT`
-
-Add these environment variables in Render (**Environment**, not in source code):
-
-| Key | Value |
-|---|---|
-| `DATABASE_URL` | The full PostgreSQL connection string from Supabase Connect |
-| `ADMIN_NAME` | Your chosen admin display name |
-| `ADMIN_EMAIL` | Your admin email address |
-| `ADMIN_PASSWORD` | A new, unique password with at least 12 characters |
-| `TOKEN_SECRET` | A random secret at least 32 characters long; generate one rather than reusing a password |
-| `FRONTEND_ORIGINS` | Your deployed frontend URL, such as `https://aimefilms-web.onrender.com`, with no trailing slash |
-
-For a random token secret on a computer with Python, run `python -c "import secrets; print(secrets.token_urlsafe(48))"`. Keep the result private. For local development, use `http://localhost:5173` as the frontend origin.
-
-The configured admin account is synchronized to `ADMIN_NAME`, `ADMIN_EMAIL`, and `ADMIN_PASSWORD` when the backend starts. Use a new password; never reuse the exposed credential from the old source code.
-
-## 4. Configure the frontend static site
-
-The frontend must be built with the actual public URL of the deployed FastAPI service. Never use `http://localhost:8001` in a live site.
-
-**If you publish on GitHub Pages:**
-1. Open repository **Settings → Pages** and choose **Build and deployment → Source: GitHub Actions**.
-2. Open **Settings → Secrets and variables → Actions → Variables** and add a repository variable named `VITE_API_BASE_URL`.
-3. Set its value to the actual FastAPI service URL (for example, the Render URL assigned to `aimefilms-api`, without a trailing slash).
-4. Redeploy after setting the variable. The GitHub Pages workflow checks for it before building the production frontend.
-
-For this repository, the GitHub Pages site URL should be `https://mfashwanayo.github.io/aimefilms/`; set the FastAPI `FRONTEND_ORIGINS` value to the origin `https://mfashwanayo.github.io` (no path, no trailing slash).
-
-**If you publish the frontend on Render Static Site instead**, add `VITE_API_BASE_URL` in that site's Environment settings and redeploy. Use the exact deployed website origin for the backend's `FRONTEND_ORIGINS`.
-
-## 5. Test the deployment
-
-Open these using the actual backend hostname:
-
-- `https://YOUR-BACKEND.onrender.com/health` should return `{"ok":true}`.
-- `https://YOUR-BACKEND.onrender.com/api/movies` should return JSON after the database is connected.
-
-Then open the frontend, test registration/login, and test an admin action. If the backend starts but browser requests fail, recheck `FRONTEND_ORIGINS` and `VITE_API_BASE_URL`.
-
-## Important notes
-
-- The new backend expects Supabase PostgreSQL, not the old local SQLite file. Existing SQLite data is not automatically migrated by this patch; export/import it separately if you need to keep existing users or movies.
-- The `schema.sql` enables Row Level Security on the tables and defines no anonymous read policies. The frontend must access data through the FastAPI backend, not direct table queries.
-- Rotate the exposed admin password immediately. Deleting it from the latest source does not erase it from old Git history. If the repository was public while the credential was present, consider cleaning the history after rotation.
-- `POST /api/seed` is administrator-only, and the public frontend no longer submits movies to seed the shared database. Upload and manage the production catalogue through the authenticated Admin dashboard.
-
-## Video uploads (resumable, 3.9 GB target)
-
-The admin form uploads video files directly from the browser to Supabase Storage using resumable TUS chunks, so the multi-GB file does not pass through Render. Storage keys use the virtual folder `films/<movie-id>/<generated-file-name>` inside the `aimefilms-videos` bucket. After a successful upload, FastAPI verifies the object and immediately writes the public URL into the movie's `video_url` or `full_movie_url` database column.
-
-Supported formats: MP4, WebM, MOV and MKV. The application target is 3.9 GB (3,900,000,000 bytes). Supabase recommends resumable uploads for large files and uses 6 MiB chunks; see the [Supabase resumable upload guide](https://supabase.com/docs/guides/storage/uploads/resumable-uploads).
-
-**Important current-plan limit:** this project is on Supabase Free, whose global file limit cannot exceed 50 MB. I set the bucket-level target to 3.9 GB, but the global Free-plan limit still rejects files over 50 MB. To enable real 3.9 GB uploads, upgrade the project to Pro or a compatible plan and then open **Supabase → Storage → Settings** and raise the **Global file size limit** to at least 3.9 GB. The bucket limit cannot override the global limit. See [Supabase file limits](https://supabase.com/docs/guides/storage/uploads/file-limits).
-
-Add the following in Render's backend service Environment settings:
-
-| Key | Value |
-|---|---|
-| `SUPABASE_URL` | `https://fadsjkoaoxbtigelhcna.supabase.co` |
-| `SUPABASE_SERVICE_ROLE_KEY` | Private server-side key from Supabase; never expose or commit it |
-| `SUPABASE_PUBLISHABLE_KEY` | The project's public/publishable API key |
-| `SUPABASE_VIDEO_BUCKET` | `aimefilms-videos` |
-| `MAX_VIDEO_UPLOAD_MB` | `3900` |
-| `TMDB_API_KEY` | Optional private TMDB API key used by the admin Fetch TMDB button |
-
-After those values are set and the backend is deployed, sign in as admin, open **Film Inventory → Upload New Film**, choose a trailer or full movie file, and click **Commit to Database**. The UI displays progress and retries chunks after transient network errors. Videos are publicly readable for playback, so only upload content you have rights to distribute.
-
-
-## 5. If admin email/password login stopped working
-
-The login form uses the backend only; it no longer accepts browser-stored or hardcoded admin credentials.
-
-1. In Render, open the **AimeFilms API** service and confirm these environment variables exist: `DATABASE_URL`, `ADMIN_NAME`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`, and `TOKEN_SECRET`.
-2. `ADMIN_PASSWORD` must be at least 12 characters. Use the exact email in `ADMIN_EMAIL` (email comparison is case-insensitive). On backend startup, the configured admin account is synchronized to these values and its password is reset to `ADMIN_PASSWORD`.
-3. Confirm the Render service deployed successfully and its logs do not report missing environment variables or a database connection error.
-4. In GitHub repository **Settings → Secrets and variables → Actions → Variables**, confirm `VITE_API_BASE_URL` is set to the actual deployed API base URL (for example `https://your-api-service.onrender.com`, no trailing slash). Rebuild/redeploy the frontend after changing this value.
-5. Set `FRONTEND_ORIGINS` in Render to the exact public frontend origin, with no trailing slash. If using GitHub Pages, use the actual Pages domain.
-6. After changing settings, restart/redeploy the backend and redeploy the frontend. Then try the configured admin email and the new `ADMIN_PASSWORD`.
-
-Do not reuse the old password that was exposed in Git history. If you do not control the Render service settings, the code change alone cannot restore live login: those environment variables and the live deployment must be checked by the service owner.
+The backend uses a bounded PostgreSQL connection pool. There is no scheduler because the current app has no genuine recurring workload; abandoned local upload parts are cleaned on API startup. Actual FFmpeg/GPU transcoding is not included yet and requires a separate media worker and job queue.

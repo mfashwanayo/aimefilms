@@ -1,23 +1,36 @@
 # AimeFilms
 
-AimeFilms is a React and TypeScript streaming catalogue with a Python FastAPI backend and Supabase PostgreSQL database.
+AimeFilms is a React + TypeScript streaming catalogue backed by a Python FastAPI service and PostgreSQL. The repository keeps browser code, API code, media files and deployment configuration separate.
 
-## Run locally
+## Repository layout
 
-### Frontend
-
-Prerequisites: Node.js
-
-```bash
-npm install
-npm run dev
+```text
+aimefilms/
+├── frontend/                 # React, TypeScript, Vite and UI components
+│   ├── components/
+│   ├── locales/
+│   ├── services/             # API client and backend adapters
+│   ├── App.tsx
+│   ├── index.css
+│   ├── package.json
+│   └── vite.config.ts
+├── backend-python/           # FastAPI application
+│   ├── core/                 # Configuration, DB pool, auth, catalogue, media storage
+│   ├── tests/
+│   ├── storage/              # Local uploads (ignored by Git)
+│   ├── app.py                # API routes and application lifecycle
+│   └── requirements.txt
+├── supabase/                 # PostgreSQL schema
+├── .github/workflows/        # Validation and Pages deployment
+├── render.yaml
+└── README.md
 ```
 
-The frontend reads `VITE_API_BASE_URL` and defaults to `http://localhost:8001`.
+## Run locally on Windows
 
-### FastAPI backend
+Use two terminal windows.
 
-Prerequisites: Python 3.11+ and a PostgreSQL connection string from your Supabase project's **Connect** panel.
+### 1. Start the backend
 
 ```powershell
 cd backend-python
@@ -25,90 +38,102 @@ py -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
 Copy-Item .env.example .env
-# Edit .env and set DATABASE_URL, ADMIN_NAME, ADMIN_EMAIL, ADMIN_PASSWORD, TOKEN_SECRET
-uvicorn app:app --host 0.0.0.0 --port 8001 --reload
 ```
 
-On macOS/Linux, activate with `source .venv/bin/activate` and copy the template with `cp .env.example .env`.
+Edit `backend-python/.env`. Set your PostgreSQL connection string from Supabase Connect, administrator name/email/password, and a random `TOKEN_SECRET` of at least 32 characters. Keep these values private.
 
-Open `http://localhost:8001/docs` for interactive API documentation. `/health` verifies the database connection.
+For local files, use:
 
-### Upload a video
+```env
+VIDEO_STORAGE_DRIVER=local
+VIDEO_STORAGE_DIR=storage
+FRONTEND_ORIGINS=http://localhost:5173
+```
 
-Use `POST /api/admin/videos/upload` in Swagger UI. Click **Authorize** and enter the admin bearer token, choose the video file, optionally set `movie_id` to update an existing movie, and set `field` to `fullMovieUrl` or `videoUrl`. Supported files: MP4, WebM, MOV and MKV. The current Supabase Free project is configured for a 50 MB per-file maximum. Set `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_VIDEO_BUCKET` and `MAX_VIDEO_UPLOAD_MB` in the backend environment. Keep the service-role key private.
+Then start FastAPI:
 
-## Admin control panel
+```powershell
+uvicorn app:app --host 127.0.0.1 --port 8001 --reload
+```
 
-The protected admin dashboard includes:
+API health: <http://localhost:8001/health>  
+Interactive API docs: <http://localhost:8001/docs>
 
-- **Insights:** per-brand catalogue/view summaries, top-viewed films and recent system activity.
-- **Film inventory:** create, edit, hide/show, search and delete films across AimeFilms, FilmsNyarwanda and PrinceFilms; import metadata from TMDB when the server key is configured.
-- **Media library:** inspect trailer, full-movie, subtitle and alternate-audio references for every film.
-- **User registry:** search accounts, edit safe profile metadata, verify/unverify, allow/disable downloads, and block/unblock non-admin users. Administrator accounts are protected.
-- **Feedback inbox:** search messages, filter read/unread, mark messages as read and delete messages.
-- **Event logs:** review and filter audit events, with an explicit clear-history action.
-- **System status:** check API/database availability, Storage configuration, safe upload-limit information, database counts and the configured CORS website origins. No secrets are exposed.
+### 2. Start the frontend
 
-All privileged operations require a valid administrator bearer token and are enforced by the FastAPI backend. The dashboard does not grant administrator roles or reveal/reset passwords from the user registry.
+In a second PowerShell window:
 
-## Backend performance and operations
+```powershell
+cd frontend
+npm ci
+npm run dev
+```
 
-The API creates PostgreSQL indexes for the catalogue's public section/name lookups, recipient inbox queries, audit-log ordering, and per-user watchlist/history reads. PostgreSQL handles these operations directly; no scheduled task is currently required for them. Add a scheduled worker only when the product introduces a real recurring workload such as expiring sessions, media-processing retries, or periodic cleanup.
+Open <http://localhost:5173>.
 
-For durable video storage, use Supabase Storage (or another object-storage service) rather than the Render service's local filesystem. Render's ephemeral application filesystem is not a reliable place to keep user uploads across redeploys and restarts. Large video uploads should go directly from the browser to the storage provider using the authenticated upload flow; the API should authorize the upload and persist the resulting media reference.
+The frontend uses `VITE_API_BASE_URL` from `frontend/.env.example`. Its local default is `http://localhost:8001`.
 
-## Database
+## Local upload folders
 
-Supabase PostgreSQL is used for accounts, movies, views, watchlists, messages and logs. The schema is in `supabase/schema.sql`; the backend also creates missing tables at startup. Tables have Row Level Security enabled and should be accessed through the trusted FastAPI backend, not directly from browser code.
+When `VIDEO_STORAGE_DRIVER=local`, the backend creates and manages:
 
-## Deploy on Render
+```text
+backend-python/storage/
+├── .tmp/                      # incomplete upload parts, cleaned at startup
+└── public/
+    └── films/
+        └── <movie-id>/
+            ├── <generated-id>.mp4
+            ├── subtitle/
+            └── audio/
+```
 
-This repository contains `render.yaml` for the FastAPI Web Service:
+Files are written in bounded chunks to a temporary file, then atomically moved into the final folder after a successful upload. Names are generated by the backend rather than trusting the original filename. Local media is served from the API's `/media/` route. The `storage/` folder is excluded from Git so videos cannot be committed accidentally.
 
-- Root Directory: `backend-python`
-- Build Command: `pip install -r requirements.txt`
-- Start Command: `uvicorn app:app --host 0.0.0.0 --port $PORT`
+## Production deployment
 
-Configure these private backend environment variables in Render: `DATABASE_URL`, `ADMIN_NAME`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `TOKEN_SECRET`, and `FRONTEND_ORIGINS`. Configure `VITE_API_BASE_URL` on your frontend Static Site using the actual backend URL.
+The Render blueprint keeps `backend-python` as its root directory and sets `VIDEO_STORAGE_DRIVER=supabase`. This is intentional: Render services without a persistent disk have an ephemeral filesystem, so locally saved media could disappear on restart or redeploy. The production browser uploader continues using resumable Supabase TUS chunks, with the API authorizing the upload and saving the resulting URL in PostgreSQL.
 
-## Security notes
+Configure these private Render environment variables:
 
-- Never commit a real `.env` file, database password, or Supabase secret/service-role key.
-- The administrator password previously exposed in frontend code should be rotated. The frontend no longer verifies logins locally when the backend is unavailable.
-- Existing SQLite data is not automatically imported. Back up and migrate any data you need to retain.
-- For a live deployment, verify `/health`, then test registration, login, movies and admin routes.
-
-
-## Upload videos from the admin dashboard
-
-The admin movie form can upload a trailer and/or a full movie directly to Supabase Storage using resumable TUS chunks. Files are placed under the Storage path `films/<movie-id>/<generated-file-name>`, and when an upload completes, the corresponding `videoUrl` or `fullMovieUrl` field is saved in PostgreSQL immediately.
-
-Supported formats: MP4, WebM, MOV and MKV. Application limit: 3.9 GB (3,900,000,000 bytes). Large files upload directly from the browser to Storage; they do not pass through Render.
-
-Required additional backend environment variables:
-
-- `SUPABASE_URL`
-- `SUPABASE_SERVICE_ROLE_KEY` — private, server-side only
-- `SUPABASE_PUBLISHABLE_KEY` — public/publishable API key
+- `DATABASE_URL`: PostgreSQL connection string from Supabase Connect
+- `ADMIN_NAME`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`
+- `TOKEN_SECRET`: random secret of at least 32 characters
+- `FRONTEND_ORIGINS`: exact deployed frontend origin
+- `VIDEO_STORAGE_DRIVER=supabase`
+- `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_PUBLISHABLE_KEY`
 - `SUPABASE_VIDEO_BUCKET=aimefilms-videos`
 - `MAX_VIDEO_UPLOAD_MB=3900`
 
-**Plan limit:** the current Supabase Free project is limited to 50 MB per file. To actually accept videos up to 3.9 GB, upgrade the Supabase project to Pro (or another plan that supports the size), then set Storage's Global file size limit to at least 3.9 GB. The bucket-level limit and backend variable alone cannot override the global plan limit.
+For GitHub Pages, set the Actions variable `VITE_API_BASE_URL` to your deployed HTTPS FastAPI service URL. Keep the Supabase service-role key and database password on the backend only.
 
- 
-## Admin dashboard and database operations
+**Upload size note:** the application limit is configured for 3.9 GB, but Supabase's project plan/global Storage limit must also allow that size. The app setting alone cannot override a provider plan limit.
 
-Admin actions are saved through the FastAPI/PostgreSQL database, not merely in this browser's local storage.
+## Backend performance and reliability
 
-- **Film Inventory:** edit title, brand, section, poster, description, synopsis, year, duration, rating, genres, cast, trending/new flags, trailer URL, or full-movie URL. Changes are saved through the authenticated backend.
-- **Show/hide:** hiding a film removes it from the public catalogue but keeps it in admin inventory so it can be shown again.
-- **Delete:** removes the movie and its view/watchlist records; video objects owned by the configured Supabase Storage bucket are removed through the Storage API.
-- **User Registry:** lists registered database accounts and metadata. Blocked users cannot sign in or use authenticated API routes. Administrator accounts are protected from being blocked here. Passwords are never displayed.
-- **Registration:** signup records are saved in the backend database with a salted PBKDF2 password hash, then appear in Admin → User Registry.
-- **Export Data:** downloads database-backed movies, user summaries, logs, messages, and analytics.
+- A bounded psycopg connection pool reuses PostgreSQL connections between API requests.
+- Existing indexes support catalogue ordering/search, inbox retrieval, event log ordering and user-list queries.
+- Upload handlers validate file type/size, stream local files in chunks and clean partial files after errors.
+- API routes return structured errors; unexpected server exceptions are logged and returned as a safe generic 500 response.
+- The frontend API layer handles network/invalid-response errors, browser storage restrictions and component-level rendering errors.
+- The initial catalogue uses skeleton placeholders with subtle shadows while data loads.
 
-### Live website configuration
+No scheduler is added for the current feature set because there is no recurring task that needs one. Abandoned local upload parts are cleaned when the API starts. A real video transcoding pipeline would need a separate queue/worker and FFmpeg/GPU infrastructure; it is not currently included and the UI should not simulate it.
 
-For GitHub Pages, add a repository Actions variable named `VITE_API_BASE_URL` at **Settings → Secrets and variables → Actions → Variables**. Its value must be the public base URL of the deployed FastAPI service, without a trailing slash. Set `FRONTEND_ORIGINS` to the exact GitHub Pages origin and configure the Supabase `DATABASE_URL` plus private Storage variables on the API service. Never expose the Supabase service-role key in frontend variables.
+## Tests and checks
 
-The Pages workflow stops clearly if `VITE_API_BASE_URL` is missing, so a live build cannot silently ship with the local development URL.
+```powershell
+# Frontend
+cd frontend
+npm ci
+npm run lint
+npm run build
+
+# Backend (in another terminal)
+cd backend-python
+python -m pip install -r requirements.txt
+python -m compileall -q app.py core tests
+python -m unittest discover -s tests -v
+```
+
+Existing PostgreSQL data is preserved. The backend's startup schema setup creates missing tables/indexes but does not migrate old SQLite files. Back up and separately migrate any data from an old local SQLite database if you still need it.

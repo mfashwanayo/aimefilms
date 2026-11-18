@@ -26,6 +26,24 @@ const publicAccountOnly = (account: User): User => ({
   joinedAt: account.joinedAt,
 });
 
+function readKnownAccounts(): User[] {
+  try {
+    const raw = window.localStorage.getItem('aimefilms_known_accounts');
+    const parsed: unknown = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.map(account => publicAccountOnly(account as User)) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeKnownAccounts(accounts: User[]): void {
+  try {
+    window.localStorage.setItem('aimefilms_known_accounts', JSON.stringify(accounts));
+  } catch {
+    // Remembered accounts are optional and must not prevent sign-in.
+  }
+}
+
 const VERIFICATION_EXPIRY_SECONDS = 60;
 
 const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, initialMode, onLogin, language, brand }) => {
@@ -55,32 +73,15 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, initialMode, onL
     setError(null);
     if (isOpen) {
       setTimeout(() => firstInputRef.current?.focus(), 500);
-      const stored = localStorage.getItem('aimefilms_known_accounts');
-      if (stored) {
-        try {
-          const safeAccounts = (JSON.parse(stored) as User[]).map(publicAccountOnly);
-          setKnownAccounts(safeAccounts);
-          localStorage.setItem('aimefilms_known_accounts', JSON.stringify(safeAccounts));
-        } catch {
-          localStorage.removeItem('aimefilms_known_accounts');
-          setKnownAccounts([]);
-        }
-      }
+      setKnownAccounts(readKnownAccounts());
     }
   }, [initialMode, isOpen]);
 
   const saveKnownAccount = (user: User) => {
-    let accounts: User[] = [];
-    try {
-      const stored = localStorage.getItem('aimefilms_known_accounts');
-      accounts = stored ? (JSON.parse(stored) as User[]).map(publicAccountOnly) : [];
-    } catch {
-      accounts = [];
-    }
-    accounts = accounts.filter(account => account.email.toLowerCase() !== user.email.toLowerCase());
+    const accounts = readKnownAccounts().filter(account => account.email.toLowerCase() !== user.email.toLowerCase());
     if (rememberMe) accounts.unshift(publicAccountOnly(user));
     const limited = accounts.slice(0, 3);
-    localStorage.setItem('aimefilms_known_accounts', JSON.stringify(limited));
+    writeKnownAccounts(limited);
     setKnownAccounts(limited);
   };
 

@@ -1,64 +1,44 @@
 from __future__ import annotations
 
-import base64
-import hashlib
-import hmac
 import json
+import logging
 import os
 import re
-import secrets
-import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
-from dotenv import load_dotenv
-import psycopg
 import requests
-from psycopg.rows import dict_row
+import psycopg
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.security import HTTPBearer
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.security import HTTPBearer
+from fastapi.staticfiles import StaticFiles
 
-load_dotenv(Path(__file__).resolve().parent / ".env")
+from core.catalogue import (
+    BOOLEAN_FIELDS, JSON_FIELDS, MOVIE_DEFAULTS, MOVIE_FIELDS,
+    insert_movie, movie_from_row, movie_values, normalize_movie, parse_json,
+)
+from core.config import (
+    ADMIN_EMAIL, ADMIN_NAME, ADMIN_PASSWORD, DATABASE_URL, FRONTEND_ORIGINS,
+    MAX_VIDEO_UPLOAD_BYTES, MAX_VIDEO_UPLOAD_MB, SUPABASE_PUBLISHABLE_KEY,
+    SUPABASE_SERVICE_ROLE_KEY, SUPABASE_URL, SUPABASE_VIDEO_BUCKET,
+    TMDB_API_KEY, TOKEN_SECRET, VIDEO_MIME_BY_EXTENSION, VIDEO_PUBLIC_DIR,
+    VIDEO_STORAGE_DRIVER, validate_config,
+)
+from core.database import close_pool, db, open_pool
+from core.media_storage import (
+    clean_stale_upload_parts, delete_local_media_url, ensure_storage_dirs,
+    local_media_url, store_local_file,
+)
+from core.security import (
+    admin_user, current_user, encode_token, hash_password, public_user, verify_password,
+)
 
-# All credentials are provided by the backend environment (Render), never by the
-# browser or checked-in source. DATABASE_URL must be the PostgreSQL connection
-# string from Supabase's Connect panel, not the https://<project>.supabase.co URL.
-DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
-ADMIN_NAME = os.getenv("ADMIN_NAME", "").strip()
-ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "").strip().lower()
-ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
-TOKEN_SECRET = os.getenv("TOKEN_SECRET", "")
-TOKEN_TTL_SECONDS = 60 * 60 * 24 * 7
-
-# Video uploads use Supabase Storage. Keep this key private and server-side.
-SUPABASE_URL = os.getenv("SUPABASE_URL", "").strip().rstrip("/")
-SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
-SUPABASE_PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY", "").strip()
-SUPABASE_VIDEO_BUCKET = os.getenv("SUPABASE_VIDEO_BUCKET", "aimefilms-videos").strip()
-TMDB_API_KEY = os.getenv("TMDB_API_KEY", "").strip()
-try:
-    MAX_VIDEO_UPLOAD_MB = max(1, int(os.getenv("MAX_VIDEO_UPLOAD_MB", "3900")))
-except ValueError:
-    MAX_VIDEO_UPLOAD_MB = 3900
-MAX_VIDEO_UPLOAD_BYTES = MAX_VIDEO_UPLOAD_MB * 1_000_000
-VIDEO_MIME_BY_EXTENSION = {
-    ".mp4": "video/mp4",
-    ".webm": "video/webm",
-    ".mov": "video/quicktime",
-    ".mkv": "video/x-matroska",
-}
-
-FRONTEND_ORIGINS = [
-    origin.strip().rstrip("/")
-    for origin in os.getenv("FRONTEND_ORIGINS", "http://localhost:5173").split(",")
-    if origin.strip()
-]
-
+logger = logging.getLogger("aimefilms.api")
 
 app = FastAPI(
     title="AimeFilms API",
@@ -67,6 +47,9 @@ app = FastAPI(
 )
 
 video_upload_bearer = HTTPBearer(auto_error=False)
+
+ensure_storage_dirs()
+app.mount("/media", StaticFiles(directory=str(VIDEO_PUBLIC_DIR), check_dir=False), name="media")
 
 @app.middleware("http")
 async def reject_oversized_video_uploads(request: Request, call_next):
@@ -97,6 +80,21 @@ async def http_error_response(request: Request, exc: HTTPException) -> JSONRespo
         content={"success": False, "message": message, "detail": message},
         headers=exc.headers,
     )
+
+
+@app.exception_handler(Exception)
+async def unexpected_error_response(request: Request, exc: Exception) -> JSONResponse:
+    """Return a safe API error and log the traceback instead of exposing internals."""
+    logger.error(
+        "Unhandled API error for %s %s",
+        request.method,
+        request.url.path,
+        exc_info=(type(exc), exc, exc.__traceback__),
+    )
+    return JSONResponse(
+        status_code=500,
+        content={"success": False, "message": "The server could not complete this request. Please retry."},
+    )
 app.add_middleware(
     CORSMiddleware,
     allow_origins=FRONTEND_ORIGINS,
@@ -105,78 +103,8 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type"],
 )
 
-MOVIE_FIELDS = [
-    "id", "name", "brand", "category", "section", "is_hidden", "description",
-    "highlights", "pros", "image_url", "logo_url", "link", "video_url",
-    "full_movie_url", "rating", "year", "duration", "cast", "synopsis",
-    "is_trending", "is_new", "genre", "match_score", "price", "tmdb_id", "version",
-    "subcategory", "preview_text", "landscape_image_url", "director", "producer",
-    "languages", "tags", "subtitle_tracks", "audio_tracks",
-]
-JSON_FIELDS = {"highlights", "pros", "cast", "genre", "languages", "tags", "subtitle_tracks", "audio_tracks"}
-BOOLEAN_FIELDS = {"is_hidden", "is_trending", "is_new"}
-MOVIE_DEFAULTS: dict[str, Any] = {
-    "name": "Untitled movie", "brand": "aimefilms", "category": "General Entertainment",
-    "section": "english", "is_hidden": False, "description": "", "highlights": [],
-    "pros": [], "image_url": "", "logo_url": "", "link": "", "video_url": "",
-    "full_movie_url": "", "rating": "0", "year": "", "duration": "", "cast": [],
-    "synopsis": "", "is_trending": False, "is_new": False, "genre": [],
-    "match_score": 0, "price": None, "tmdb_id": "", "version": "", "subcategory": "",
-    "preview_text": "", "landscape_image_url": "", "director": "", "producer": "",
-    "languages": [], "tags": [], "subtitle_tracks": [], "audio_tracks": [],
-}
-
-
-def validate_config() -> None:
-    missing = [
-        key for key, value in (
-            ("DATABASE_URL", DATABASE_URL),
-            ("ADMIN_NAME", ADMIN_NAME),
-            ("ADMIN_EMAIL", ADMIN_EMAIL),
-            ("ADMIN_PASSWORD", ADMIN_PASSWORD),
-            ("TOKEN_SECRET", TOKEN_SECRET),
-        ) if not value
-    ]
-    if missing:
-        raise RuntimeError("Missing required environment variables: " + ", ".join(missing))
-    if not DATABASE_URL.startswith(("postgresql://", "postgres://")):
-        raise RuntimeError("DATABASE_URL must be a PostgreSQL connection string from Supabase Connect.")
-    if len(ADMIN_PASSWORD) < 12:
-        raise RuntimeError("ADMIN_PASSWORD must be at least 12 characters long.")
-    if len(TOKEN_SECRET) < 32:
-        raise RuntimeError("TOKEN_SECRET must be at least 32 characters long.")
-
-
-def db() -> psycopg.Connection:
-    if not DATABASE_URL:
-        raise RuntimeError("DATABASE_URL is not configured. Set it in the backend environment.")
-    return psycopg.connect(
-        DATABASE_URL,
-        row_factory=dict_row,
-        sslmode="require",
-        connect_timeout=10,
-    )
-
-
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
-
-
-def hash_password(password: str) -> str:
-    salt = secrets.token_bytes(16)
-    digest = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 240_000)
-    return base64.urlsafe_b64encode(salt).decode() + "$" + base64.urlsafe_b64encode(digest).decode()
-
-
-def verify_password(password: str, stored: str) -> bool:
-    try:
-        salt_text, digest_text = stored.split("$", 1)
-        salt = base64.urlsafe_b64decode(salt_text.encode())
-        expected = base64.urlsafe_b64decode(digest_text.encode())
-        actual = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 240_000)
-        return hmac.compare_digest(actual, expected)
-    except (ValueError, TypeError):
-        return False
 
 
 def init_db() -> None:
@@ -216,12 +144,8 @@ def init_db() -> None:
         "ALTER TABLE movies ADD COLUMN IF NOT EXISTS subtitle_tracks TEXT NOT NULL DEFAULT '[]'",
         "ALTER TABLE movies ADD COLUMN IF NOT EXISTS audio_tracks TEXT NOT NULL DEFAULT '[]'",
         "CREATE INDEX IF NOT EXISTS movies_ordinal_idx ON movies (ordinal DESC)",
-        # Index the access patterns used by catalogue, inbox, audit and user-list queries.
         "CREATE INDEX IF NOT EXISTS movies_public_section_ordinal_idx ON movies (is_hidden, section, ordinal DESC)",
         "CREATE INDEX IF NOT EXISTS movies_name_lower_idx ON movies (lower(name))",
-        "CREATE INDEX IF NOT EXISTS messages_recipient_timestamp_idx ON messages (lower(to_email), timestamp DESC)",
-        "CREATE INDEX IF NOT EXISTS logs_timestamp_idx ON logs (timestamp DESC)",
-        "CREATE INDEX IF NOT EXISTS user_lists_owner_type_created_idx ON user_lists (email, list_type, created_at)",
         """CREATE TABLE IF NOT EXISTS views (
             movie_id TEXT PRIMARY KEY, view_count BIGINT NOT NULL DEFAULT 0, updated_at TEXT NOT NULL
         )""",
@@ -237,6 +161,10 @@ def init_db() -> None:
             email TEXT NOT NULL, list_type TEXT NOT NULL, movie_id TEXT NOT NULL,
             created_at TEXT NOT NULL, PRIMARY KEY (email, list_type, movie_id)
         )""",
+        # Create cross-table indexes only after every target table exists.
+        "CREATE INDEX IF NOT EXISTS messages_recipient_timestamp_idx ON messages (lower(to_email), timestamp DESC)",
+        "CREATE INDEX IF NOT EXISTS logs_timestamp_idx ON logs (timestamp DESC)",
+        "CREATE INDEX IF NOT EXISTS user_lists_owner_type_created_idx ON user_lists (email, list_type, created_at)",
     ]
     with db() as connection:
         for statement in schema_statements:
@@ -262,129 +190,6 @@ def init_db() -> None:
             connection.execute(f'ALTER TABLE "{table}" ENABLE ROW LEVEL SECURITY')
 
 
-def encode_token(user: dict[str, Any]) -> str:
-    payload = {"email": user["email"], "exp": int(time.time()) + TOKEN_TTL_SECONDS}
-    encoded = base64.urlsafe_b64encode(json.dumps(payload, separators=(",", ":")).encode()).decode().rstrip("=")
-    signature = hmac.new(TOKEN_SECRET.encode(), encoded.encode(), hashlib.sha256).hexdigest()
-    return encoded + "." + signature
-
-
-def current_user(request: Request) -> dict[str, Any]:
-    header = request.headers.get("authorization", "")
-    try:
-        if not header.lower().startswith("bearer "):
-            raise ValueError("missing bearer token")
-        encoded, signature = header.split(" ", 1)[1].split(".", 1)
-        expected = hmac.new(TOKEN_SECRET.encode(), encoded.encode(), hashlib.sha256).hexdigest()
-        if not hmac.compare_digest(signature, expected):
-            raise ValueError("invalid signature")
-        payload = json.loads(base64.urlsafe_b64decode((encoded + "===").encode()).decode())
-        if int(payload["exp"]) < int(time.time()):
-            raise ValueError("expired token")
-    except (ValueError, KeyError, TypeError, json.JSONDecodeError, IndexError):
-        raise HTTPException(status_code=401, detail="Invalid or expired token.")
-
-    with db() as connection:
-        user = connection.execute("SELECT * FROM users WHERE email = %s", (payload["email"],)).fetchone()
-    if not user or user["is_blocked"]:
-        raise HTTPException(status_code=403, detail="Account is unavailable.")
-    return user
-
-
-def admin_user(request: Request) -> dict[str, Any]:
-    user = current_user(request)
-    if user["role"] != "admin":
-        raise HTTPException(status_code=403, detail="Administrator access required.")
-    return user
-
-
-def public_user(user: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "name": user["name"], "email": user["email"], "avatar": user.get("avatar"),
-        "role": user["role"], "isVerified": bool(user.get("is_verified", 1)),
-        "canDownload": bool(user.get("can_download", 1)), "language": user.get("language", "EN"),
-        "isBlocked": bool(user.get("is_blocked", 0)), "joinedAt": user.get("joined_at"),
-    }
-
-
-def parse_json(value: Any, default: Any) -> Any:
-    if value in (None, ""):
-        return default
-    try:
-        return json.loads(value) if isinstance(value, str) else value
-    except (TypeError, json.JSONDecodeError):
-        return default
-
-
-def movie_from_row(row: dict[str, Any]) -> dict[str, Any]:
-    value = dict(row)
-    return {
-        "id": value["id"], "name": value["name"], "brand": value["brand"], "category": value["category"],
-        "section": value["section"], "isHidden": bool(value["is_hidden"]), "description": value["description"],
-        "highlights": parse_json(value["highlights"], []), "pros": parse_json(value["pros"], []),
-        "imageUrl": value["image_url"], "logoUrl": value["logo_url"], "link": value["link"],
-        "videoUrl": value["video_url"], "fullMovieUrl": value["full_movie_url"], "rating": value["rating"],
-        "year": value["year"], "duration": value["duration"], "cast": parse_json(value["cast"], []),
-        "synopsis": value["synopsis"], "isTrending": bool(value["is_trending"]), "isNew": bool(value["is_new"]),
-        "genre": parse_json(value["genre"], []), "matchScore": float(value["match_score"]), "price": value["price"],
-        "tmdbId": value.get("tmdb_id", ""), "version": value.get("version", ""),
-        "subcategory": value.get("subcategory", ""), "previewText": value.get("preview_text", ""),
-        "landscapeImageUrl": value.get("landscape_image_url", ""), "director": value.get("director", ""),
-        "producer": value.get("producer", ""), "languages": parse_json(value.get("languages"), []),
-        "tags": parse_json(value.get("tags"), []), "subtitleTracks": parse_json(value.get("subtitle_tracks"), []),
-        "audioTracks": parse_json(value.get("audio_tracks"), []),
-    }
-
-
-def normalize_movie(data: dict[str, Any], movie_id: str | None = None) -> dict[str, Any]:
-    movie = {**MOVIE_DEFAULTS, **data}
-    aliases = {
-        "imageUrl": "image_url", "logoUrl": "logo_url", "videoUrl": "video_url",
-        "fullMovieUrl": "full_movie_url", "isHidden": "is_hidden", "isTrending": "is_trending",
-        "isNew": "is_new", "matchScore": "match_score", "tmdbId": "tmdb_id",
-        "previewText": "preview_text", "landscapeImageUrl": "landscape_image_url",
-        "subtitleTracks": "subtitle_tracks", "audioTracks": "audio_tracks",
-    }
-    for source, target in aliases.items():
-        if source in movie:
-            movie[target] = movie.pop(source)
-    movie["id"] = movie_id or movie.get("id") or uuid.uuid4().hex
-    for field in JSON_FIELDS:
-        if not isinstance(movie.get(field), list):
-            movie[field] = []
-    for field in BOOLEAN_FIELDS:
-        movie[field] = bool(movie.get(field))
-    # PostgreSQL is stricter than SQLite about values stored in TEXT columns.
-    for field in ("name", "brand", "category", "section", "description", "image_url", "logo_url",
-                  "link", "video_url", "full_movie_url", "rating", "year", "duration", "synopsis",
-                  "tmdb_id", "version", "subcategory", "preview_text", "landscape_image_url", "director", "producer"):
-        if movie.get(field) is None:
-            movie[field] = ""
-        elif not isinstance(movie[field], str):
-            movie[field] = str(movie[field])
-    if movie.get("price") is not None and not isinstance(movie["price"], str):
-        movie["price"] = str(movie["price"])
-    return movie
-
-
-def movie_values(movie: dict[str, Any]) -> tuple[Any, ...]:
-    return tuple(
-        json.dumps(movie[field]) if field in JSON_FIELDS
-        else int(movie[field]) if field in BOOLEAN_FIELDS
-        else movie.get(field)
-        for field in MOVIE_FIELDS
-    )
-
-
-def insert_movie(connection: psycopg.Connection, movie: dict[str, Any]) -> None:
-    columns = ",".join(f'"{field}"' for field in MOVIE_FIELDS)
-    placeholders = ",".join("%s" for _ in MOVIE_FIELDS)
-    connection.execute(
-        f"INSERT INTO movies ({columns}) VALUES ({placeholders}) ON CONFLICT DO NOTHING",
-        movie_values(movie),
-    )
-
-
 def record_log(connection: psycopg.Connection, event_type: str, details: str, email: str | None = None) -> None:
     connection.execute(
         "INSERT INTO logs (id, type, details, user_email, timestamp) VALUES (%s, %s, %s, %s, %s)",
@@ -393,14 +198,18 @@ def record_log(connection: psycopg.Connection, event_type: str, details: str, em
 
 
 def remove_managed_video_objects(public_urls: list[str]) -> None:
-    """Remove only video objects owned by this application's configured Storage bucket."""
+    """Remove only files stored by this application in local or Supabase storage."""
+    object_paths: list[str] = []
     bucket_prefix = f"/storage/v1/object/public/{SUPABASE_VIDEO_BUCKET}/"
     base = urlparse(SUPABASE_URL) if SUPABASE_URL else None
-    object_paths: list[str] = []
+
     for value in public_urls:
         if not value:
             continue
-        parsed = urlparse(str(value))
+        value = str(value)
+        if delete_local_media_url(value):
+            continue
+        parsed = urlparse(value)
         if not parsed.path.startswith(bucket_prefix):
             continue
         if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY or base is None:
@@ -445,7 +254,21 @@ async def json_body(request: Request) -> dict[str, Any]:
 @app.on_event("startup")
 def startup() -> None:
     validate_config()
-    init_db()
+    open_pool()
+    ensure_storage_dirs()
+    removed_parts = clean_stale_upload_parts()
+    if removed_parts:
+        logger.info("Removed %s abandoned temporary uploads", removed_parts)
+    try:
+        init_db()
+    except Exception:
+        close_pool()
+        raise
+
+
+@app.on_event("shutdown")
+def shutdown() -> None:
+    close_pool()
 
 
 @app.get("/")
@@ -740,16 +563,31 @@ async def create_video_upload(request: Request) -> dict[str, Any]:
     if content_type not in ("", "application/octet-stream", expected_content_type):
         raise HTTPException(status_code=415, detail="Video content type does not match its file extension.")
 
+    with db() as connection:
+        movie = connection.execute("SELECT id FROM movies WHERE id = %s", (movie_id,)).fetchone()
+    if not movie:
+        raise HTTPException(status_code=404, detail="Save the movie metadata before uploading its video.")
+
+    if VIDEO_STORAGE_DRIVER == "local":
+        with db() as connection:
+            record_log(connection, "VIDEO_UPLOAD_START", f"Prepared local video upload for movie {movie_id}", user["email"])
+        return {
+            "success": True,
+            "storageMode": "local",
+            "movieId": movie_id,
+            "field": field,
+            "sizeBytes": size_bytes,
+            "maxFileSizeBytes": MAX_VIDEO_UPLOAD_BYTES,
+        }
+
     if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY or not SUPABASE_PUBLISHABLE_KEY:
         raise HTTPException(
             status_code=503,
-            detail="Video storage requires SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, and SUPABASE_PUBLISHABLE_KEY.",
+            detail="Supabase video storage requires SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, and SUPABASE_PUBLISHABLE_KEY.",
         )
     if not SUPABASE_URL.startswith("https://"):
         raise HTTPException(status_code=503, detail="SUPABASE_URL must be an HTTPS Supabase project URL.")
 
-    with db() as connection:
-        movie = connection.execute("SELECT id FROM movies WHERE id = %s", (movie_id,)).fetchone()
     if not movie:
         raise HTTPException(status_code=404, detail="Save the movie metadata before uploading its video.")
 
@@ -792,6 +630,7 @@ async def create_video_upload(request: Request) -> dict[str, Any]:
 
     return {
         "success": True,
+        "storageMode": "supabase",
         "bucket": SUPABASE_VIDEO_BUCKET,
         "path": object_path,
         "signedToken": signed_token,
@@ -865,17 +704,8 @@ def upload_video(
     field: str = Form(default="fullMovieUrl", description="Either fullMovieUrl or videoUrl"),
     bearer_credentials: Any = Depends(video_upload_bearer),
 ) -> dict[str, Any]:
-    """Upload a video to Supabase Storage. Only authenticated admins may upload."""
+    """Receive local uploads or relay legacy single-request uploads to Supabase."""
     user = admin_user(request)
-
-    if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
-        raise HTTPException(
-            status_code=503,
-            detail="Video storage is not configured. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY on the backend.",
-        )
-    if not SUPABASE_URL.startswith("https://"):
-        raise HTTPException(status_code=503, detail="SUPABASE_URL must be an HTTPS Supabase project URL.")
-
     field_to_column = {"videoUrl": "video_url", "fullMovieUrl": "full_movie_url"}
     if field not in field_to_column:
         raise HTTPException(status_code=422, detail="field must be videoUrl or fullMovieUrl.")
@@ -908,14 +738,57 @@ def upload_video(
     if file_size <= 0:
         raise HTTPException(status_code=422, detail="The uploaded video is empty.")
     if file_size > MAX_VIDEO_UPLOAD_BYTES:
-        raise HTTPException(
-            status_code=413,
-            detail=f"Video is too large. The configured limit is {MAX_VIDEO_UPLOAD_MB} MB.",
-        )
+        raise HTTPException(status_code=413, detail=f"Video is too large. The configured limit is {MAX_VIDEO_UPLOAD_MB} MB.")
 
-    # Use a generated path rather than trusting a user-supplied filename.
-    folder = re.sub(r"[^A-Za-z0-9_-]", "", movie_id or "")[:80] or "unassigned"
-    object_path = f"{folder}/{uuid.uuid4().hex}{extension}"
+    safe_movie_id = re.sub(r"[^A-Za-z0-9_-]", "", movie_id or "")[:80] or "unassigned"
+
+    if VIDEO_STORAGE_DRIVER == "local":
+        try:
+            object_path, stored_size = store_local_file(
+                file.file,
+                f"films/{safe_movie_id}",
+                extension,
+                MAX_VIDEO_UPLOAD_BYTES,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=413, detail=str(exc))
+        except OSError:
+            logger.exception("Could not save local video upload for movie %s", movie_id)
+            raise HTTPException(status_code=507, detail="The backend could not save this video to local storage. Check disk space and permissions.")
+
+        public_url = local_media_url(str(request.base_url), object_path)
+        response: dict[str, Any] = {
+            "success": True,
+            "storageMode": "local",
+            "path": object_path,
+            "url": public_url,
+            "sizeBytes": stored_size,
+            "contentType": expected_content_type,
+        }
+        if movie_id:
+            try:
+                with db() as connection:
+                    connection.execute(
+                        f'UPDATE movies SET "{field_to_column[field]}" = %s WHERE id = %s',
+                        (public_url, movie_id),
+                    )
+                    record_log(connection, "VIDEO_UPLOAD", f"Saved local video to {object_path} for movie {movie_id}", user["email"])
+            except Exception:
+                delete_local_media_url(public_url)
+                logger.exception("Local video was stored but its movie record could not be updated")
+                raise HTTPException(status_code=503, detail="The video could not be linked to the movie record. The local file was cleaned up; please retry.")
+            response.update({"movieId": movie_id, "field": field, "movieUrlUpdated": True})
+        else:
+            response["movieUrlUpdated"] = False
+            response["message"] = "Video saved. Attach the returned URL to a movie record when ready."
+        return response
+
+    if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+        raise HTTPException(status_code=503, detail="Supabase Storage is not configured.")
+    if not SUPABASE_URL.startswith("https://"):
+        raise HTTPException(status_code=503, detail="SUPABASE_URL must be an HTTPS Supabase project URL.")
+
+    object_path = f"films/{safe_movie_id}/{uuid.uuid4().hex}{extension}"
     bucket_segment = quote(SUPABASE_VIDEO_BUCKET, safe="")
     object_segment = quote(object_path, safe="/")
     upload_url = f"{SUPABASE_URL}/storage/v1/object/{bucket_segment}/{object_segment}"
@@ -926,53 +799,41 @@ def upload_video(
         "Cache-Control": "3600",
         "x-upsert": "false",
     }
-
     try:
         file.file.seek(0)
-        storage_response = requests.post(
-            upload_url,
-            data=file.file,
-            headers=headers,
-            timeout=(15, 300),
-        )
+        storage_response = requests.post(upload_url, data=file.file, headers=headers, timeout=(15, 300))
     except requests.RequestException:
         raise HTTPException(status_code=502, detail="Could not reach Supabase Storage. Check the backend storage settings and try again.")
-
     if not storage_response.ok:
         if storage_response.status_code == 413:
             raise HTTPException(status_code=413, detail="Supabase Storage rejected the video because it exceeds the project's upload limit.")
         if storage_response.status_code == 409:
             raise HTTPException(status_code=409, detail="A video already exists at this storage path. Please retry the upload.")
-        raise HTTPException(
-            status_code=502,
-            detail="Supabase Storage rejected the video. Check the storage bucket and server-side key configuration.",
-        )
+        raise HTTPException(status_code=502, detail="Supabase Storage rejected the video. Check the storage bucket and server-side key configuration.")
 
     public_url = f"{SUPABASE_URL}/storage/v1/object/public/{bucket_segment}/{object_segment}"
-    response: dict[str, Any] = {
-        "success": True,
-        "bucket": SUPABASE_VIDEO_BUCKET,
-        "path": object_path,
-        "url": public_url,
-        "sizeBytes": file_size,
-        "contentType": expected_content_type,
+    response = {
+        "success": True, "storageMode": "supabase", "bucket": SUPABASE_VIDEO_BUCKET,
+        "path": object_path, "url": public_url, "sizeBytes": file_size, "contentType": expected_content_type,
     }
-
     if movie_id:
-        target_column = field_to_column[field]
-        with db() as connection:
-            connection.execute(
-                f'UPDATE movies SET "{target_column}" = %s WHERE id = %s',
-                (public_url, movie_id),
-            )
-            record_log(connection, "VIDEO_UPLOAD", f"Uploaded video to {field} for movie {movie_id}", user["email"])
-        response["movieId"] = movie_id
-        response["field"] = field
-        response["movieUrlUpdated"] = True
+        try:
+            with db() as connection:
+                connection.execute(
+                    f'UPDATE movies SET "{field_to_column[field]}" = %s WHERE id = %s',
+                    (public_url, movie_id),
+                )
+                record_log(connection, "VIDEO_UPLOAD", f"Uploaded video to {field} for movie {movie_id}", user["email"])
+        except Exception:
+            try:
+                remove_managed_video_objects([public_url])
+            except Exception:
+                logger.exception("Could not clean up Supabase video after a failed database update")
+            logger.exception("Supabase video was uploaded but its movie record could not be updated")
+            raise HTTPException(status_code=503, detail="The video could not be linked to the movie record. Please retry the upload.")
+        response.update({"movieId": movie_id, "field": field, "movieUrlUpdated": True})
     else:
-        response["movieUrlUpdated"] = False
-        response["message"] = "Video uploaded. Save the returned URL in the movie's videoUrl or fullMovieUrl field."
-
+        response.update({"movieUrlUpdated": False, "message": "Video uploaded. Save the returned URL in the movie record."})
     return response
 
 
@@ -1007,45 +868,116 @@ def fetch_tmdb_metadata(tmdb_id: str, request: Request) -> dict[str, Any]:
 
 
 @app.post("/api/admin/media-assets/upload")
-def upload_media_asset(request: Request, file: UploadFile = File(...), movie_id: str = Form(...), kind: str = Form(...), language: str = Form(default="English")) -> dict[str, Any]:
+def upload_media_asset(
+    request: Request,
+    file: UploadFile = File(...),
+    movie_id: str = Form(...),
+    kind: str = Form(...),
+    language: str = Form(default="English"),
+) -> dict[str, Any]:
     """Upload and persist a subtitle or alternate-audio file."""
     user = admin_user(request)
-    if kind not in ("subtitle", "audio"): raise HTTPException(status_code=422, detail="kind must be subtitle or audio.")
-    if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY: raise HTTPException(status_code=503, detail="Media storage is not configured on the backend.")
+    if kind not in ("subtitle", "audio"):
+        raise HTTPException(status_code=422, detail="kind must be subtitle or audio.")
+
     movie_id = movie_id.strip()
-    if not movie_id or len(movie_id) > 128: raise HTTPException(status_code=422, detail="A valid movie_id is required.")
-    original_name = Path(file.filename or "").name; extension = Path(original_name).suffix.lower()
-    subtitle_types = {".srt": "text/plain", ".vtt": "text/vtt"}
-    audio_types = {".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".aac": "audio/aac", ".ogg": "audio/ogg", ".wav": "audio/wav", ".flac": "audio/flac"}
-    allowed_types = subtitle_types if kind == "subtitle" else audio_types; content_type = allowed_types.get(extension)
-    if not content_type: raise HTTPException(status_code=415, detail=f"Unsupported {kind} format. Supported files: {', '.join(sorted(allowed_types))}.")
-    try: file.file.seek(0, os.SEEK_END); file_size = file.file.tell(); file.file.seek(0)
-    except (OSError, ValueError): raise HTTPException(status_code=400, detail="Unable to read the uploaded file.")
-    if file_size <= 0 or file_size > 200_000_000: raise HTTPException(status_code=413, detail="Subtitle/audio files must be between 1 byte and 200 MB.")
-    with db() as connection: movie_exists = connection.execute("SELECT id FROM movies WHERE id = %s", (movie_id,)).fetchone()
-    if not movie_exists: raise HTTPException(status_code=404, detail="Movie not found. Save its details before uploading media tracks.")
-    safe_movie_id = re.sub(r"[^A-Za-z0-9_-]", "", movie_id)[:80] or "movie"
-    object_path = f"films/{safe_movie_id}/{kind}/{uuid.uuid4().hex}{extension}"
-    bucket_segment, object_segment = quote(SUPABASE_VIDEO_BUCKET, safe=""), quote(object_path, safe="/")
-    upload_url = f"{SUPABASE_URL}/storage/v1/object/{bucket_segment}/{object_segment}"
-    headers = {"apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}", "Content-Type": content_type, "Cache-Control": "3600", "x-upsert": "false"}
-    try: file.file.seek(0); storage_response = requests.post(upload_url, data=file.file, headers=headers, timeout=(15, 180))
-    except requests.RequestException: raise HTTPException(status_code=502, detail="Could not reach Supabase Storage for this media file.")
-    if not storage_response.ok:
-        if storage_response.status_code == 413: raise HTTPException(status_code=413, detail="Supabase Storage rejected the file because of the project's upload limit.")
-        raise HTTPException(status_code=502, detail="Supabase Storage rejected this file. Check the bucket and server-side key settings.")
-    public_url = f"{SUPABASE_URL}/storage/v1/object/public/{bucket_segment}/{object_segment}"
-    if kind == "subtitle" and extension == ".srt":
-        # Browser video players require WebVTT; convert SRT timings before uploading.
-        raise HTTPException(status_code=415, detail="Please convert SRT captions to WebVTT (.vtt) before upload for browser playback.")
-    track = {"language": (language or "English").strip()[:40], "url": public_url, "fileName": original_name, "path": object_path}
-    column = "subtitle_tracks" if kind == "subtitle" else "audio_tracks"
+    if not movie_id or len(movie_id) > 128:
+        raise HTTPException(status_code=422, detail="A valid movie_id is required.")
+
+    original_name = Path(file.filename or "").name
+    extension = Path(original_name).suffix.lower()
+    # Web players use WebVTT directly; SRT must be converted before upload.
+    subtitle_types = {".vtt": "text/vtt"}
+    audio_types = {
+        ".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".aac": "audio/aac",
+        ".ogg": "audio/ogg", ".wav": "audio/wav", ".flac": "audio/flac",
+    }
+    allowed_types = subtitle_types if kind == "subtitle" else audio_types
+    content_type = allowed_types.get(extension)
+    if not content_type:
+        raise HTTPException(status_code=415, detail=f"Unsupported {kind} format. Supported files: {', '.join(sorted(allowed_types))}.")
+
+    try:
+        file.file.seek(0, os.SEEK_END)
+        file_size = file.file.tell()
+        file.file.seek(0)
+    except (OSError, ValueError):
+        raise HTTPException(status_code=400, detail="Unable to read the uploaded file.")
+    if file_size <= 0 or file_size > 200_000_000:
+        raise HTTPException(status_code=413, detail="Subtitle/audio files must be between 1 byte and 200 MB.")
+
     with db() as connection:
-        row = connection.execute(f'SELECT "{column}" FROM movies WHERE id = %s', (movie_id,)).fetchone()
-        if not row: raise HTTPException(status_code=404, detail="Movie not found.")
-        tracks = parse_json(row[column], []); tracks.append(track)
-        connection.execute(f'UPDATE movies SET "{column}" = %s WHERE id = %s', (json.dumps(tracks), movie_id))
-        record_log(connection, "MEDIA_UPLOAD", f"Uploaded {kind} track ({language}) for movie {movie_id}", user["email"])
+        movie_exists = connection.execute("SELECT id FROM movies WHERE id = %s", (movie_id,)).fetchone()
+    if not movie_exists:
+        raise HTTPException(status_code=404, detail="Movie not found. Save its details before uploading media tracks.")
+
+    safe_movie_id = re.sub(r"[^A-Za-z0-9_-]", "", movie_id)[:80] or "movie"
+    if VIDEO_STORAGE_DRIVER == "local":
+        try:
+            object_path, stored_size = store_local_file(
+                file.file,
+                f"films/{safe_movie_id}/{kind}",
+                extension,
+                200_000_000,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=413, detail=str(exc))
+        except OSError:
+            logger.exception("Could not save %s file for movie %s", kind, movie_id)
+            raise HTTPException(status_code=507, detail="The backend could not save this media file. Check disk space and permissions.")
+        public_url = local_media_url(str(request.base_url), object_path)
+    else:
+        if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY or not SUPABASE_URL.startswith("https://"):
+            raise HTTPException(status_code=503, detail="Supabase media storage is not configured correctly.")
+        object_path = f"films/{safe_movie_id}/{kind}/{uuid.uuid4().hex}{extension}"
+        bucket_segment = quote(SUPABASE_VIDEO_BUCKET, safe="")
+        object_segment = quote(object_path, safe="/")
+        upload_url = f"{SUPABASE_URL}/storage/v1/object/{bucket_segment}/{object_segment}"
+        headers = {
+            "apikey": SUPABASE_SERVICE_ROLE_KEY,
+            "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+            "Content-Type": content_type,
+            "Cache-Control": "3600",
+            "x-upsert": "false",
+        }
+        try:
+            file.file.seek(0)
+            storage_response = requests.post(upload_url, data=file.file, headers=headers, timeout=(15, 180))
+        except requests.RequestException:
+            raise HTTPException(status_code=502, detail="Could not reach Supabase Storage for this media file.")
+        if not storage_response.ok:
+            if storage_response.status_code == 413:
+                raise HTTPException(status_code=413, detail="Supabase Storage rejected the file because of the project's upload limit.")
+            raise HTTPException(status_code=502, detail="Supabase Storage rejected this file. Check the bucket and server-side key settings.")
+        public_url = f"{SUPABASE_URL}/storage/v1/object/public/{bucket_segment}/{object_segment}"
+
+    track = {
+        "language": (language or "English").strip()[:40],
+        "url": public_url,
+        "fileName": original_name,
+        "path": object_path,
+    }
+    column = "subtitle_tracks" if kind == "subtitle" else "audio_tracks"
+    try:
+        with db() as connection:
+            row = connection.execute(f'SELECT "{column}" FROM movies WHERE id = %s', (movie_id,)).fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Movie not found.")
+            tracks = parse_json(row[column], [])
+            tracks.append(track)
+            connection.execute(f'UPDATE movies SET "{column}" = %s WHERE id = %s', (json.dumps(tracks), movie_id))
+            record_log(connection, "MEDIA_UPLOAD", f"Uploaded {kind} track ({language}) for movie {movie_id}", user["email"])
+    except Exception:
+        try:
+            remove_managed_video_objects([public_url])
+        except Exception:
+            logger.exception("Could not clean up an uploaded %s asset after database update failure", kind)
+        logger.exception("Could not attach uploaded %s asset to movie %s", kind, movie_id)
+        raise HTTPException(
+            status_code=503,
+            detail="The media file could not be attached to the movie record. Please retry the upload.",
+        )
+
     return {"success": True, "movieId": movie_id, "kind": kind, "track": track}
 
 
@@ -1094,13 +1026,23 @@ def delete_movie(movie_id: str, request: Request) -> dict[str, Any]:
     administrator = admin_user(request)
     with db() as connection:
         movie = connection.execute(
-            "SELECT id, name, video_url, full_movie_url FROM movies WHERE id = %s",
+            "SELECT id, name, video_url, full_movie_url, subtitle_tracks, audio_tracks FROM movies WHERE id = %s",
             (movie_id,),
         ).fetchone()
         if not movie:
             raise HTTPException(status_code=404, detail="Movie not found.")
-        # Preserve the row when Storage cannot delete the managed video objects.
-        remove_managed_video_objects([movie.get("video_url") or "", movie.get("full_movie_url") or ""])
+        track_urls = [
+            track.get("url")
+            for field in ("subtitle_tracks", "audio_tracks")
+            for track in parse_json(movie.get(field), [])
+            if isinstance(track, dict) and track.get("url")
+        ]
+        # Preserve the database record if a managed remote object cannot be removed.
+        remove_managed_video_objects([
+            movie.get("video_url") or "",
+            movie.get("full_movie_url") or "",
+            *track_urls,
+        ])
         connection.execute("DELETE FROM movies WHERE id = %s", (movie_id,))
         connection.execute("DELETE FROM views WHERE movie_id = %s", (movie_id,))
         connection.execute("DELETE FROM user_lists WHERE movie_id = %s", (movie_id,))
@@ -1165,16 +1107,20 @@ def admin_system_status(request: Request) -> dict[str, Any]:
             "unreadMessages": connection.execute("SELECT COUNT(*) AS total FROM messages WHERE is_read = 0").fetchone()["total"],
             "views": connection.execute("SELECT COALESCE(SUM(view_count), 0) AS total FROM views").fetchone()["total"],
         }
-    storage_ready = bool(SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY and SUPABASE_PUBLISHABLE_KEY)
+    storage_ready = VIDEO_STORAGE_DRIVER == "local" or bool(
+        SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY and SUPABASE_PUBLISHABLE_KEY
+    )
     return {
         "success": True,
         "system": {
             "api": {"name": "AimeFilms API", "version": app.version, "status": "online"},
-            "database": {"status": "connected", "provider": "Supabase PostgreSQL" if DATABASE_URL else "PostgreSQL"},
+            "database": {"status": "connected", "provider": "Supabase PostgreSQL"},
             "storage": {
                 "status": "configured" if storage_ready else "not_configured",
-                "provider": "Supabase Storage",
-                "bucket": SUPABASE_VIDEO_BUCKET,
+                "driver": VIDEO_STORAGE_DRIVER,
+                "provider": "Local backend filesystem" if VIDEO_STORAGE_DRIVER == "local" else "Supabase Storage",
+                "bucket": SUPABASE_VIDEO_BUCKET if VIDEO_STORAGE_DRIVER == "supabase" else None,
+                "directory": "backend-python/storage/public" if VIDEO_STORAGE_DRIVER == "local" else None,
                 "maxVideoUploadMB": MAX_VIDEO_UPLOAD_MB,
             },
             "frontendOrigins": FRONTEND_ORIGINS,
