@@ -766,12 +766,17 @@ def upload_video(
             "contentType": expected_content_type,
         }
         if movie_id:
-            with db() as connection:
-                connection.execute(
-                    f'UPDATE movies SET "{field_to_column[field]}" = %s WHERE id = %s',
-                    (public_url, movie_id),
-                )
-                record_log(connection, "VIDEO_UPLOAD", f"Saved local video to {object_path} for movie {movie_id}", user["email"])
+            try:
+                with db() as connection:
+                    connection.execute(
+                        f'UPDATE movies SET "{field_to_column[field]}" = %s WHERE id = %s',
+                        (public_url, movie_id),
+                    )
+                    record_log(connection, "VIDEO_UPLOAD", f"Saved local video to {object_path} for movie {movie_id}", user["email"])
+            except Exception:
+                delete_local_media_url(public_url)
+                logger.exception("Local video was stored but its movie record could not be updated")
+                raise HTTPException(status_code=503, detail="The video could not be linked to the movie record. The local file was cleaned up; please retry.")
             response.update({"movieId": movie_id, "field": field, "movieUrlUpdated": True})
         else:
             response["movieUrlUpdated"] = False
@@ -812,12 +817,20 @@ def upload_video(
         "path": object_path, "url": public_url, "sizeBytes": file_size, "contentType": expected_content_type,
     }
     if movie_id:
-        with db() as connection:
-            connection.execute(
-                f'UPDATE movies SET "{field_to_column[field]}" = %s WHERE id = %s',
-                (public_url, movie_id),
-            )
-            record_log(connection, "VIDEO_UPLOAD", f"Uploaded video to {field} for movie {movie_id}", user["email"])
+        try:
+            with db() as connection:
+                connection.execute(
+                    f'UPDATE movies SET "{field_to_column[field]}" = %s WHERE id = %s',
+                    (public_url, movie_id),
+                )
+                record_log(connection, "VIDEO_UPLOAD", f"Uploaded video to {field} for movie {movie_id}", user["email"])
+        except Exception:
+            try:
+                remove_managed_video_objects([public_url])
+            except Exception:
+                logger.exception("Could not clean up Supabase video after a failed database update")
+            logger.exception("Supabase video was uploaded but its movie record could not be updated")
+            raise HTTPException(status_code=503, detail="The video could not be linked to the movie record. Please retry the upload.")
         response.update({"movieId": movie_id, "field": field, "movieUrlUpdated": True})
     else:
         response.update({"movieUrlUpdated": False, "message": "Video uploaded. Save the returned URL in the movie record."})
