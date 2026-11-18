@@ -12,12 +12,16 @@ permissions:
 jobs:
   frontend:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
+          cache-dependency-path: frontend/package-lock.json
       - run: npm ci
       - run: npm run lint
       - run: npm run build
@@ -33,22 +37,27 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install -r requirements.txt
-      - run: python -m py_compile app.py
+      - run: python -m compileall -q app.py core tests
+      - name: Test local media storage
+        run: python -m unittest discover -s tests -v
       - name: Verify API route registration
         env:
-          DB_PATH: ${{ runner.temp }}/aimefilms-ci.sqlite
+          DATABASE_URL: postgresql://ci:ci@localhost:5432/aimefilms
           ADMIN_NAME: ci-admin
           ADMIN_EMAIL: ci-admin@example.com
           ADMIN_PASSWORD: ci-only-password
           TOKEN_SECRET: ci-only-token-secret
+          VIDEO_STORAGE_DRIVER: local
         run: |
           python - <<'PY'
           from app import app
           paths = {route.path for route in app.routes}
           required = {
               "/health",
+              "/media",
               "/api/admin/videos/create-upload",
               "/api/admin/videos/complete-upload",
+              "/api/admin/videos/upload",
               "/api/admin/movies",
               "/api/admin/movies/{movie_id}",
               "/api/admin/users",
