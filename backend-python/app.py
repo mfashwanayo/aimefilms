@@ -11,6 +11,7 @@ from typing import Any
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
 import requests
+import psycopg
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -242,7 +243,7 @@ def remove_managed_video_objects(public_urls: list[str]) -> None:
         raise HTTPException(status_code=502, detail="Supabase Storage could not delete the video's files. The movie was not deleted.")
 
 
-def json_body(request: Request) -> dict[str, Any]:
+async def json_body(request: Request) -> dict[str, Any]:
     try:
         value = await request.json()
         return value if isinstance(value, dict) else {}
