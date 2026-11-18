@@ -968,10 +968,15 @@ def upload_media_asset(
             connection.execute(f'UPDATE movies SET "{column}" = %s WHERE id = %s', (json.dumps(tracks), movie_id))
             record_log(connection, "MEDIA_UPLOAD", f"Uploaded {kind} track ({language}) for movie {movie_id}", user["email"])
     except Exception:
-        if VIDEO_STORAGE_DRIVER == "local":
-            delete_local_media_url(public_url)
+        try:
+            remove_managed_video_objects([public_url])
+        except Exception:
+            logger.exception("Could not clean up an uploaded %s asset after database update failure", kind)
         logger.exception("Could not attach uploaded %s asset to movie %s", kind, movie_id)
-        raise
+        raise HTTPException(
+            status_code=503,
+            detail="The media file could not be attached to the movie record. Please retry the upload.",
+        )
 
     return {"success": True, "movieId": movie_id, "kind": kind, "track": track}
 
