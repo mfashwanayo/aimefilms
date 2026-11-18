@@ -4,6 +4,11 @@ import { AimeFilmsAPI } from '../services/api';
 import { backendFetchTmdbMovie, backendUploadMediaAsset, backendUploadVideo } from '../services/backendApi';
 import { StreamingService, User, LogEntry, UserMessage, Brand, Language } from '../types';
 import Logo from './Logo';
+import {
+  Activity, Bell, Clapperboard, CloudUpload, Download, Eye, EyeOff, FileVideo,
+  FolderOpen, Gauge, HardDrive, LayoutDashboard, LogOut, MessageSquare,
+  Pencil, Search, Server, Settings, ShieldCheck, Trash2, Users, XCircle,
+} from 'lucide-react';
 
 interface AdminDashboardProps {
   isOpen: boolean;
@@ -13,7 +18,8 @@ interface AdminDashboardProps {
 }
 
 const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefresh, brand }) => {
-  const [activeTab, setActiveTab] = useState<'movies' | 'users' | 'history' | 'feedback' | 'analytics' | 'media' | 'settings'>('analytics');
+  const [activeTab, setActiveTab] = useState<'movies' | 'upload' | 'users' | 'history' | 'feedback' | 'analytics' | 'media' | 'settings'>('analytics');
+  const [uploadDragActive, setUploadDragActive] = useState(false);
   const [movies, setMovies] = useState<StreamingService[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [editingUser, setEditingUser] = useState<User | null>(null);
@@ -153,12 +159,19 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
     setIsLoading(true);
     setAdminError('');
     try {
-      if (activeTab === 'movies' || activeTab === 'media') setMovies(await AimeFilmsAPI.getAdminMovies());
-      else if (activeTab === 'users') setUsers(await AimeFilmsAPI.getAllUsers());
+      if (activeTab === 'movies' || activeTab === 'media' || activeTab === 'upload') {
+        setMovies(await AimeFilmsAPI.getAdminMovies());
+      } else if (activeTab === 'users') setUsers(await AimeFilmsAPI.getAllUsers());
       else if (activeTab === 'history') setLogs(await AimeFilmsAPI.getLogs());
       else if (activeTab === 'feedback') setMessages(await AimeFilmsAPI.getAllMessages());
-      else if (activeTab === 'analytics') setStats(await AimeFilmsAPI.getIntelligenceData());
-      else if (activeTab === 'settings') setSystemInfo(await AimeFilmsAPI.getAdminSystemStatus());
+      else if (activeTab === 'analytics') {
+        const [analytics, system] = await Promise.all([
+          AimeFilmsAPI.getIntelligenceData(),
+          AimeFilmsAPI.getAdminSystemStatus(),
+        ]);
+        setStats(analytics);
+        setSystemInfo(system);
+      } else if (activeTab === 'settings') setSystemInfo(await AimeFilmsAPI.getAdminSystemStatus());
     } catch (error) {
       setAdminError(error instanceof Error ? error.message : 'Could not load data from the database.');
     } finally {
@@ -200,6 +213,23 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
       matchScore: 90
     });
     setIsAddingMovie(true);
+  };
+
+  const handleQuickUpload = (file: File) => {
+    const allowedExtensions = /\.(mp4|webm|mov|mkv)$/i;
+    if (!allowedExtensions.test(file.name)) {
+      setAdminError('Choose an MP4, WebM, MOV, or MKV video file.');
+      return;
+    }
+    if (file.size <= 0 || file.size > 3_900_000_000) {
+      setAdminError('Video files must be between 1 byte and 3.9 GB.');
+      return;
+    }
+    handleStartNewMovie();
+    setSelectedVideoFiles({ fullMovieUrl: file });
+    setVideoProgress({ fullMovieUrl: 0 });
+    setUploadStatus('Video selected. Complete the film details, then save to upload it.');
+    setAdminError('');
   };
 
   const handleEditMovie = (movie: StreamingService) => {
