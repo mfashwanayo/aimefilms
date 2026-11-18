@@ -111,12 +111,17 @@ export class AimeFilmsAPI {
       writeStore(DB_KEY, JSON.stringify(STREAMING_SERVICES));
       return STREAMING_SERVICES;
     }
-    return parseStored<StreamingService[]>(DB_KEY, stored, STREAMING_SERVICES);
+    const movies = parseStored<StreamingService[]>(DB_KEY, stored, STREAMING_SERVICES);
+    return Array.isArray(movies) ? movies : STREAMING_SERVICES;
   }
 
   private static getAnalytics(): { views: Record<string, number>; logs: LogEntry[] } {
     const stored = readStore(ANALYTICS_KEY);
-    return parseStored(ANALYTICS_KEY, stored, { views: {}, logs: [] });
+    const value = parseStored<any>(ANALYTICS_KEY, stored, { views: {}, logs: [] });
+    return {
+      views: value?.views && typeof value.views === 'object' && !Array.isArray(value.views) ? value.views : {},
+      logs: Array.isArray(value?.logs) ? value.logs : [],
+    };
   }
 
   // --- VIEW COUNTS ---
@@ -128,7 +133,8 @@ export class AimeFilmsAPI {
   static fetchWatchlist(email: string | undefined): string[] {
     if (!email) return [];
     try {
-      return JSON.parse(readStore(`aimefilms_watchlist_${email.toLowerCase()}`) || '[]');
+      const value = JSON.parse(readStore(`aimefilms_watchlist_${email.toLowerCase()}`) || '[]');
+      return Array.isArray(value) ? value.filter((id): id is string => typeof id === 'string') : [];
     } catch {
       return [];
     }
@@ -146,7 +152,8 @@ export class AimeFilmsAPI {
   static fetchContinueWatching(email: string | undefined): string[] {
     if (!email) return [];
     try {
-      return JSON.parse(readStore(`aimefilms_continue_${email.toLowerCase()}`) || '[]');
+      const value = JSON.parse(readStore(`aimefilms_continue_${email.toLowerCase()}`) || '[]');
+      return Array.isArray(value) ? value.filter((id): id is string => typeof id === 'string') : [];
     } catch {
       return [];
     }
@@ -229,7 +236,7 @@ export class AimeFilmsAPI {
     } catch { /* fallback */ }
     const stored = readStore(INBOX_KEY);
     if (!stored) return false;
-    const inbox: UserMessage[] = JSON.parse(stored);
+    const parsedInbox = parseStored<unknown>(INBOX_KEY, stored, []);\n    const inbox: UserMessage[] = Array.isArray(parsedInbox) ? parsedInbox as UserMessage[] : [];
     const idx = inbox.findIndex(m => m.id === messageId);
     if (idx !== -1) {
       inbox[idx].isRead = true;
@@ -361,7 +368,7 @@ export class AimeFilmsAPI {
 
   private static getUsers(): (User & { password?: string })[] {
     const stored = readStore(USERS_KEY);
-    return parseStored<User[]>(USERS_KEY, stored, []);
+    const users = parseStored<unknown>(USERS_KEY, stored, []);\n    return Array.isArray(users) ? users as User[] : [];
   }
 
   private static saveUsers(users: any[]) {
