@@ -21,6 +21,27 @@ import { translations } from './locales/translations';
 
 type ViewState = 'home' | 'detail';
 
+function readLocal(key: string): string | null {
+  try { return typeof window === 'undefined' ? null : window.readLocal(key); }
+  catch { return null; }
+}
+function writeLocal(key: string, value: string): void {
+  try { if (typeof window !== 'undefined') window.writeLocal(key, value); }
+  catch { /* Storage may be disabled or full; keep the current session working. */ }
+}
+function removeLocal(key: string): void {
+  try { if (typeof window !== 'undefined') window.removeLocal(key); }
+  catch { /* Ignore browser storage restrictions. */ }
+}
+function readSession(key: string): string | null {
+  try { return typeof window === 'undefined' ? null : window.readSession(key); }
+  catch { return null; }
+}
+function writeSession(key: string, value: string): void {
+  try { if (typeof window !== 'undefined') window.writeSession(key, value); }
+  catch { /* A session preference is optional. */ }
+}
+
 const App: React.FC = () => {
   const [allMovies, setAllMovies] = useState<StreamingService[]>([]);
   const [viewCounts, setViewCounts] = useState<Record<string, number>>({});
@@ -48,7 +69,7 @@ const App: React.FC = () => {
 
   const handleLogout = () => {
     setUser(null);
-    localStorage.removeItem('aimefilms_user');
+    removeLocal('aimefilms_user');
     setIsAccountOpen(false);
     setIsAdminOpen(false);
     setCurrentView('home');
@@ -86,7 +107,7 @@ const App: React.FC = () => {
     initApp();
     const params = new URLSearchParams(window.location.search);
     if (params.get('admin_portal') === 'true') {
-      const savedUser = localStorage.getItem('aimefilms_user');
+      const savedUser = readLocal('aimefilms_user');
       if (savedUser) {
         const parsedUser = JSON.parse(savedUser);
         if (parsedUser.role === 'admin') {
@@ -102,16 +123,16 @@ const App: React.FC = () => {
       const movies = await AimeFilmsAPI.getMovies();
       setAllMovies(movies);
       setViewCounts(AimeFilmsAPI.getViewCounts());
-      const hasStarted = sessionStorage.getItem('aimefilms_started');
+      const hasStarted = readSession('aimefilms_started');
       if (hasStarted) setShowWelcome(false);
-      const savedLang = localStorage.getItem('aimefilms_lang') as Language;
+      const savedLang = readLocal('aimefilms_lang') as Language;
       if (savedLang) setLanguage(savedLang);
-      const savedUser = localStorage.getItem('aimefilms_user');
+      const savedUser = readLocal('aimefilms_user');
       if (savedUser) {
         const parsedUser = JSON.parse(savedUser);
         setUser(parsedUser);
       }
-      const savedBrand = localStorage.getItem('aimefilms_brand') as Brand;
+      const savedBrand = readLocal('aimefilms_brand') as Brand;
       if (savedBrand) setSelectedBrand(savedBrand);
     } catch (err) {
       console.error("API Error:", err);
@@ -122,36 +143,45 @@ const App: React.FC = () => {
 
   const handleLanguageChange = (lang: Language) => {
     setLanguage(lang);
-    localStorage.setItem('aimefilms_lang', lang);
+    writeLocal('aimefilms_lang', lang);
   };
 
   useEffect(() => {
+    let active = true;
     const performSearch = async () => {
       if (searchQuery.length >= 2) {
-        const results = await AimeFilmsAPI.search(searchQuery);
-        setSearchResults(results);
-        if (currentView === 'detail') setCurrentView('home');
+        try {
+          const results = await AimeFilmsAPI.search(searchQuery);
+          if (!active) return;
+          setSearchResults(results);
+          if (currentView === 'detail') setCurrentView('home');
+        } catch (error) {
+          console.warn('Film search could not be completed. Keeping the current catalogue visible.', error);
+        }
       } else {
         setSearchResults(null);
       }
     };
     const debounce = setTimeout(performSearch, 300);
-    return () => clearTimeout(debounce);
+    return () => {
+      active = false;
+      clearTimeout(debounce);
+    };
   }, [searchQuery, currentView]);
 
   const handleStartStream = () => {
     setShowWelcome(false);
-    sessionStorage.setItem('aimefilms_started', 'true');
+    writeSession('aimefilms_started', 'true');
   };
 
   const handleBrandSelect = (brand: Brand) => {
     setSelectedBrand(brand);
-    localStorage.setItem('aimefilms_brand', brand);
+    writeLocal('aimefilms_brand', brand);
   };
 
   const handleSwitchBrand = () => {
     setSelectedBrand(null);
-    localStorage.removeItem('aimefilms_brand');
+    removeLocal('aimefilms_brand');
     handleGoHome();
   };
 
@@ -195,7 +225,7 @@ const App: React.FC = () => {
 
   const handleLogin = (userData: User) => {
     setUser(userData);
-    localStorage.setItem('aimefilms_user', JSON.stringify(userData));
+    writeLocal('aimefilms_user', JSON.stringify(userData));
     setIsAuthOpen(false);
     if (userData.role === 'admin') {
       // Open admin dashboard in a new tab simulation
@@ -267,8 +297,38 @@ const App: React.FC = () => {
 
   if (isLoading && !showWelcome) {
     return (
-      <div className="min-h-screen bg-black flex items-center justify-center">
-        <div className="w-16 h-16 border-4 border-red-600 border-t-transparent rounded-full animate-spin" />
+      <div className="min-h-screen overflow-hidden bg-[#080b12] px-5 py-8 text-white md:px-10">
+        <div className="mx-auto max-w-7xl animate-pulse space-y-10">
+          <div className="flex items-center justify-between border-b border-white/10 pb-5">
+            <div className="h-8 w-40 rounded-md bg-white/10 shadow-lg shadow-black/20" />
+            <div className="flex gap-3">
+              <div className="h-9 w-28 rounded-full bg-white/[0.07]" />
+              <div className="h-9 w-9 rounded-full bg-white/[0.07]" />
+            </div>
+          </div>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-[1.55fr_1fr]">
+            <div className="h-64 rounded-2xl border border-white/[0.06] bg-gradient-to-br from-white/[0.09] to-white/[0.025] shadow-2xl shadow-black/40 md:h-80" />
+            <div className="grid grid-cols-2 gap-3">
+              <div className="h-32 rounded-xl bg-white/[0.06] shadow-xl shadow-black/30" />
+              <div className="h-32 rounded-xl bg-white/[0.06] shadow-xl shadow-black/30" />
+              <div className="col-span-2 h-28 rounded-xl bg-white/[0.06] shadow-xl shadow-black/30" />
+            </div>
+          </div>
+          {[0, 1, 2].map(row => (
+            <section key={row} className="space-y-4">
+              <div className="h-5 w-44 rounded bg-white/[0.09]" />
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+                {Array.from({ length: 6 }).map((_, index) => (
+                  <div key={index} className="space-y-2">
+                    <div className="aspect-[2/3] rounded-xl border border-white/[0.06] bg-white/[0.07] shadow-xl shadow-black/40" />
+                    <div className="h-3 w-4/5 rounded bg-white/[0.08]" />
+                    <div className="h-2.5 w-2/5 rounded bg-white/[0.05]" />
+                  </div>
+                ))}
+              </div>
+            </section>
+          ))}
+        </div>
       </div>
     );
   }
@@ -413,7 +473,7 @@ const App: React.FC = () => {
         user={user} 
         onUpdateUser={(updatedUser) => {
           setUser(updatedUser);
-          localStorage.setItem('aimefilms_user', JSON.stringify(updatedUser));
+          writeLocal('aimefilms_user', JSON.stringify(updatedUser));
         }} 
         onOpenAdmin={() => setIsAdminOpen(true)} 
         onLogout={handleLogout}
