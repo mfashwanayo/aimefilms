@@ -295,6 +295,12 @@ const App: React.FC = () => {
     return categories.filter(row => row.services.length > 0);
   }, [brandMovies, searchResults, activeCategory, watchlist, continueWatching, searchQuery, user]);
 
+  const selectionColor = useMemo(() => {
+    if (selectedBrand === 'filmsnyarwanda') return 'selection:bg-yellow-400 selection:text-black';
+    if (selectedBrand === 'princefilms') return 'selection:bg-purple-600';
+    return 'selection:bg-red-600';
+  }, [selectedBrand]);
+
   if (isLoading && !showWelcome) {
     return (
       <div className="min-h-screen overflow-hidden bg-[#080b12] px-5 py-8 text-white md:px-10">
@@ -332,12 +338,6 @@ const App: React.FC = () => {
       </div>
     );
   }
-
-  const selectionColor = useMemo(() => {
-    if (selectedBrand === 'filmsnyarwanda') return 'selection:bg-yellow-400 selection:text-black';
-    if (selectedBrand === 'princefilms') return 'selection:bg-purple-600';
-    return 'selection:bg-red-600';
-  }, [selectedBrand]);
 
   if (!selectedBrand) {
     return <SiteSelector onSelect={handleBrandSelect} />;
