@@ -28,5 +28,13 @@ services:
         value: aimefilms-videos
       - key: MAX_VIDEO_UPLOAD_MB
         value: "3900"
+      - key: VIDEO_STORAGE_DRIVER
+        value: supabase
+      - key: DB_POOL_MIN_SIZE
+        value: "1"
+      - key: DB_POOL_MAX_SIZE
+        value: "10"
       - key: SUPABASE_PUBLISHABLE_KEY
+        sync: false
+      - key: TMDB_API_KEY
         sync: false
