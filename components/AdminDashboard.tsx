@@ -103,9 +103,9 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose, onRefr
   }), [messages, messageSearch, messageReadFilter]);
 
   const unreadMessageCount = useMemo(() => messages.filter(message => !message.isRead).length, [messages]);
-  const totalCatalogMovies = Object.values(stats?.brandStats || {}).reduce((sum: number, item: any) => sum + Number(item?.movies || 0), 0);
+  const totalCatalogMovies = Object.values((stats?.brandStats || {}) as Record<string, any>).reduce<number>((sum, item) => sum + Number(item?.movies || 0), 0);
   const activeUserCount = Number(systemInfo?.counts?.users ?? 0);
-  const totalBrandViews = Object.values(stats?.brandStats || {}).reduce((sum: number, item: any) => sum + Number(item?.views || 0), 0);
+  const totalBrandViews = Object.values((stats?.brandStats || {}) as Record<string, any>).reduce<number>((sum, item) => sum + Number(item?.views || 0), 0);
   const topMovieViewMaximum = Math.max(1, ...(stats?.topMovies || []).map((movie: any) => Number(movie.views || 0)));
 
   useEffect(() => {
